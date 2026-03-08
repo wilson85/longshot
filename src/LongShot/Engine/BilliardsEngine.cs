@@ -153,22 +153,17 @@ public sealed class BilliardsEngine : IDisposable
         return _simulation.Bodies.GetBodyReference(handle).Pose.Position;
     }
 
-    public void StrikeCueBall(Vector3 direction, float targetSpeed, Vector2 tipOffset)
+    public void ApplyImpulse(int id, Vector3 impulse)
     {
-        var body = _simulation.Bodies.GetBodyReference(_ballHandles[0]);
-
-        direction = Vector3.Normalize(direction);
-
-        body.Velocity.Linear += direction * targetSpeed;
-
-        Vector3 spin = new Vector3(
-            -tipOffset.Y,
-            tipOffset.X,
-            0
-        ) * targetSpeed * 15f;
-
-        body.Velocity.Angular += spin;
+        var body = _simulation.Bodies.GetBodyReference(_ballHandles[id]);
+        body.Velocity.Linear += impulse;
         body.Awake = true;
+    }
+
+    public void ApplyAngularImpulse(int id, Vector3 impulse)
+    {
+        var body = _simulation.Bodies.GetBodyReference(_ballHandles[id]);
+        body.Velocity.Angular += impulse;
     }
 
     public bool AreAllBallsAsleep()

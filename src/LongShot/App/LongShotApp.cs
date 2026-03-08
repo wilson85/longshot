@@ -2,11 +2,19 @@
 
 namespace LongShot.App;
 
-public sealed class LongShotApp(GameWindow window, DX12Renderer renderer) : GameApplication(window)
+public sealed class LongShotApp : GameApplication
 {
     private readonly BilliardsEngine _engine = new BilliardsEngine();
-    private readonly MatchManager _match = new MatchManager();
+    private readonly CueController _cueController = new CueController();
     private readonly Camera _camera = new Camera();
+    private readonly MatchManager _match;
+    private readonly DX12Renderer _renderer;
+
+    public LongShotApp(GameWindow window, DX12Renderer renderer) : base(window)
+    {
+        _renderer = renderer;
+        _match = new MatchManager(_cueController, new CueBallSystem(_engine));
+    }
 
     protected override void Update(float dt)
     {
@@ -34,7 +42,7 @@ public sealed class LongShotApp(GameWindow window, DX12Renderer renderer) : Game
 
         Window.SetTitle($"LongShot - Mode: {_match.Mode} | {modeText}");
 
-        renderer.Render(_camera, _engine, _match);
+        _renderer.Render(_camera, _engine, _match);
     }
 
     public override void Dispose()

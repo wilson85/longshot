@@ -1,39 +1,28 @@
-﻿using System.Numerics;
-using ImGuiNET;
-using LongShot.Engine;
+﻿using LongShot.Engine;
 
 namespace LongShot;
 
-public enum GameStateMode
-{
-    View,
-    Aim,
-    Power,
-    Simulate
-}
 public sealed class MatchManager
 {
     public GameStateMode Mode { get; private set; } = GameStateMode.Aim;
 
-    public float CueStickOffset { get; private set; }
+    readonly CueController _cue;
+    readonly CueBallSystem _cueBall;
 
-    readonly ShotPowerManager _shotPower = new();
+    public float CueStickOffset => _cue.CueOffset;
 
-    Vector2 _tipOffset;
-
-    bool _hasPulledBack;
-
-    // The physical distance of the stick from the cue ball's surface.
-    // 0 = touching. Negative = pulled back. Positive = pushed through.
-    float _physicalStickOffset;
-
-    const float PullBackThreshold = -0.05f;
-    const float MaxPullback = -0.4f;
+    public MatchManager(
+        CueController cue,
+        CueBallSystem cueBall)
+    {
+        _cue = cue;
+        _cueBall = cueBall;
+    }
 
     public void Update(
         BilliardsEngine engine,
-        dynamic input,
-        dynamic camera,
+        InputState input,
+        Camera camera,
         float deltaTime)
     {
         if (Mode == GameStateMode.Simulate &&
@@ -52,119 +41,51 @@ public sealed class MatchManager
             Mode = GameStateMode.Aim;
         }
 
-        if (Mode == GameStateMode.Aim)
+        switch (Mode)
         {
-            UpdateAim(input);
+            case GameStateMode.Aim:
+                UpdateAim(input);
+                break;
 
-            if (input.Keys[(int)ConsoleKey.Spacebar])
-            {
-                input.Keys[(int)ConsoleKey.Spacebar] = false;
-                StartPowerStroke();
-            }
-        }
-        else if (Mode == GameStateMode.Power)
-        {
-            UpdatePowerStroke(engine, input, camera, deltaTime);
+            case GameStateMode.Power:
+                UpdatePower(input, camera, deltaTime);
+                break;
         }
     }
 
-    void UpdateAim(dynamic input)
+    void UpdateAim(InputState input)
     {
-        float tipSpeed = 0.003f;
+        _cue.UpdateAim(input);
 
-        _tipOffset.X += input.MouseDeltaX * tipSpeed;
-        _tipOffset.Y -= input.MouseDeltaY * tipSpeed;
-
-        _tipOffset = Vector2.Clamp(
-            _tipOffset,
-            new Vector2(-0.9f),
-            new Vector2(0.9f));
-    }
-
-    void StartPowerStroke()
-    {
-        Mode = GameStateMode.Power;
-
-        // Reset all physical state
-        _physicalStickOffset = 0f;
-        CueStickOffset = 0f;
-        _hasPulledBack = false;
-
-        _shotPower.Reset();
-    }
-
-    void UpdatePowerStroke(
-        BilliardsEngine engine,
-        dynamic input,
-        dynamic camera,
-        float deltaTime)
-    {
-        float frameMovement = input.MouseDeltaY * 0.002f;
-
-        float instantaneousVelocity = frameMovement / deltaTime;
-        _shotPower.TrackVelocity(instantaneousVelocity);
-
-        float previousOffset = _physicalStickOffset;
-        _physicalStickOffset += frameMovement;
-
-        // We clamp exactly at 0.0f so the stick physically cannot penetrate the ball.
-        _physicalStickOffset = Math.Clamp(_physicalStickOffset, MaxPullback, 0.0f);
-
-        // 1:1 Visual Mapping (No Lerping during the stroke!)
-        CueStickOffset = _physicalStickOffset;
-
-        if (_physicalStickOffset < PullBackThreshold)
+        if (input.Keys[(int)ConsoleKey.Spacebar])
         {
-            _hasPulledBack = true;
+            input.Keys[(int)ConsoleKey.Spacebar] = false;
+
+            _cue.BeginStroke();
+            Mode = GameStateMode.Power;
         }
+    }
 
-        // STRIKE DETECTION
-        bool struckBall = previousOffset < 0f && _physicalStickOffset >= 0f;
+    void UpdatePower(
+        InputState input,
+        Camera camera,
+        float dt)
+    {
+        var result = _cue.UpdateStroke(input, dt);
 
-        if (_hasPulledBack && struckBall)
+        if (result == ShotResult.Cancel)
         {
-            FireShot(engine, camera);
+            Mode = GameStateMode.Aim;
             return;
         }
 
-        if (input.Keys[(int)ConsoleKey.Escape])
+        if (result == ShotResult.Strike)
         {
-            input.Keys[(int)ConsoleKey.Escape] = false;
-            CancelShot();
+            var shot = _cue.BuildShot(camera);
+
+            _cueBall.ApplyShot(shot);
+
+            Mode = GameStateMode.Simulate;
         }
-    }
-
-    void FireShot(
-        BilliardsEngine engine,
-        dynamic camera)
-    {
-        float cueSpeed = _shotPower.CalculateImpactSpeed();
-
-        // Prevent ghost hits if the user just slowly bumped the ball
-        //if (cueSpeed < 0.15f)
-        //{
-        //    CancelShot();
-        //    return;
-        //}
-
-        Vector3 shotDir = Vector3.Normalize(new Vector3(-MathF.Sin(camera.Yaw), 0, -MathF.Cos(camera.Yaw)));
-
-        engine.StrikeCueBall(shotDir, cueSpeed, _tipOffset);
-
-        // Reset visual and physical state
-        CueStickOffset = 0;
-        _physicalStickOffset = 0;
-        _shotPower.Reset();
-
-        Mode = GameStateMode.Simulate;
-    }
-
-    void CancelShot()
-    {
-        CueStickOffset = 0;
-        _physicalStickOffset = 0;
-        _shotPower.Reset();
-
-        Mode = GameStateMode.Aim;
     }
 }

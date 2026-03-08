@@ -10,7 +10,6 @@ namespace LongShot.Engine;
 
 public struct CustomPoseIntegratorCallbacks : IPoseIntegratorCallbacks
 {
-    // FIX: We need a field to actually store the gravity across physics steps
     private Vector3Wide _gravityWide;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -27,7 +26,6 @@ public struct CustomPoseIntegratorCallbacks : IPoseIntegratorCallbacks
 
     public CustomPoseIntegratorCallbacks(Vector3 gravity)
     {
-        // FIX: Broadcast the scalar gravity into the SIMD vector format Bepu uses
         _gravityWide = Vector3Wide.Broadcast(gravity);
     }
 
@@ -46,14 +44,12 @@ public struct CustomPoseIntegratorCallbacks : IPoseIntegratorCallbacks
         Vector<float> dt,
         ref BodyVelocityWide velocity)
     {
-        var linearDrag = Broadcast(0.9985f);
-        var angularDrag = Broadcast(0.995f);
+        var linearDrag = Broadcast(0.98f);
+        var angularDrag = Broadcast(0.97f);
 
         velocity.Linear *= linearDrag;
         velocity.Angular *= angularDrag;
 
-        // FIX: Actually apply the gravity to the Linear Velocity!
-        // This is what pulls the balls down into the table and prevents floating.
         velocity.Linear.X += _gravityWide.X * dt;
         velocity.Linear.Y += _gravityWide.Y * dt;
         velocity.Linear.Z += _gravityWide.Z * dt;
