@@ -6,53 +6,42 @@ public sealed class CueController
 {
     readonly ShotPowerManager _power = new();
 
-    Vector2 _tipOffset;
+    // Changed to a public property so we can read it for the UI later!
+    public Vector2 TipOffset { get; private set; }
 
     public float CueOffset => _power.CueStickOffset;
 
     public void UpdateAim(InputState input)
     {
-        float speed = 0.003f;
+        // ONLY move the tip offset if the player is holding E
+        if (input.Keys[(int)ConsoleKey.E])
+        {
+            float speed = 0.003f;
+            var offset = TipOffset;
 
-        _tipOffset.X += input.MouseDeltaX * speed;
-        _tipOffset.Y -= input.MouseDeltaY * speed;
+            offset.X += input.MouseDeltaX * speed;
+            offset.Y -= input.MouseDeltaY * speed;
 
-        _tipOffset = Vector2.Clamp(_tipOffset, new(-0.9f), new(0.9f));
+            TipOffset = Vector2.Clamp(offset, new Vector2(-0.9f), new Vector2(0.9f));
+        }
     }
 
     public ShotResult UpdateStroke(InputState input, float dt)
         => _power.UpdateStroke(input, dt);
 
     public Shot BuildShot(Camera camera)
-        => _power.BuildShot(camera);
+    {
+        // Pass the TipOffset down to build the shot
+        var shot = _power.BuildShot(camera, TipOffset);
+
+        // CRITICAL FIX: Reset the spin back to dead-center after the strike!
+        TipOffset = Vector2.Zero;
+
+        return shot;
+    }
 
     public void BeginStroke()
     {
         _power.BeginStroke();
     }
 }
-
-public static class CuePoseSolver
-{
-    public static Matrix4x4 Solve(
-        Vector3 cueBall,
-        float yaw,
-        float cueOffset)
-    {
-        var rot = Matrix4x4.CreateRotationY(yaw);
-
-        float visualOffset = 0.5f + cueOffset;
-
-        var offset = Vector3.Transform(
-            new Vector3(0, 0, visualOffset),
-            rot);
-
-        var pos = cueBall + offset;
-
-        return
-            Matrix4x4.CreateScale(0.015f, 0.015f, 1.0f) *
-            rot *
-            Matrix4x4.CreateTranslation(pos);
-    }
-}
-

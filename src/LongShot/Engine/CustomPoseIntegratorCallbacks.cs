@@ -44,8 +44,9 @@ public struct CustomPoseIntegratorCallbacks : IPoseIntegratorCallbacks
         Vector<float> dt,
         ref BodyVelocityWide velocity)
     {
-        var linearDrag = Broadcast(0.98f);
-        var angularDrag = Broadcast(0.97f);
+        // Inside IntegrateVelocity:
+        var linearDrag = Vector.Max(Vector<float>.Zero, Broadcast(1f) - Broadcast(0.02f) * dt);
+        var angularDrag = Vector.Max(Vector<float>.Zero, Broadcast(1f) - Broadcast(0.05f) * dt);
 
         velocity.Linear *= linearDrag;
         velocity.Angular *= angularDrag;
@@ -60,25 +61,32 @@ public struct CustomNarrowPhaseCallbacks : INarrowPhaseCallbacks
 {
     public StaticHandle FloorHandle;
 
+    // Phenolic Resin (Balls) - Very hard, perfectly elastic
     static readonly PairMaterialProperties BallBallMaterial = new()
     {
-        FrictionCoefficient = 0.02f,
-        MaximumRecoveryVelocity = 3f,
-        SpringSettings = new SpringSettings(1400, 1f)
+        FrictionCoefficient = 0.005f,
+        MaximumRecoveryVelocity = float.MaxValue,
+        SpringSettings = new SpringSettings(600, 0.0f)
     };
 
-    static readonly PairMaterialProperties ClothMaterial = new()
-    {
-        FrictionCoefficient = 0.6f,
-        MaximumRecoveryVelocity = 1f,
-        SpringSettings = new SpringSettings(120, 1f)
-    };
-
+    // Vulcanized Rubber (Cushions) - Softer than balls, highly elastic
     static readonly PairMaterialProperties CushionMaterial = new()
     {
-        FrictionCoefficient = 0.5f,
-        MaximumRecoveryVelocity = 3f,
-        SpringSettings = new SpringSettings(1600, 0.8f)
+        // 0.25f friction allows the rubber to "catch" the spin and throw the ball 
+        // at an angle, without making it roll up the rail.
+        FrictionCoefficient = 0.25f,
+        MaximumRecoveryVelocity = float.MaxValue,
+        // 120 rad/s (~19 Hz). The spring compresses and violently expands 
+        // over the course of exactly 2-3 physics frames, resulting in a massive bounce.
+        SpringSettings = new SpringSettings(120, 0.0f)
+    };
+
+    // Cloth (Table Bed)
+    static readonly PairMaterialProperties ClothMaterial = new()
+    {
+        FrictionCoefficient = 0.2f,
+        MaximumRecoveryVelocity = 1f,
+        SpringSettings = new SpringSettings(120, 1f)
     };
 
     public void Initialize(Simulation simulation) { }

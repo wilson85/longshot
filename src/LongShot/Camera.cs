@@ -37,6 +37,7 @@ public class Camera
         }
 
 
+
         if (input.MouseWheelDelta != 0)
         {
             Distance -= (input.MouseWheelDelta / 120.0f) * 0.25f;
@@ -44,7 +45,8 @@ public class Camera
 
         Pitch = Math.Clamp(Pitch, 0.1f, MathF.PI / 2.0f - 0.05f);
 
-        float minDistance = (mode == GameStateMode.View) ? 0.3f : 1.5f;
+        // Allow zooming in to 20cm away from the target in ANY mode
+        float minDistance = 0.2f;
         Distance = Math.Clamp(Distance, minDistance, 6.0f);
 
         Position = Target + new Vector3(

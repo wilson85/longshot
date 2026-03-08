@@ -4,28 +4,15 @@ namespace LongShot;
 
 public sealed class ShotPowerManager
 {
-    const int VelocitySamples = 4;
-
-    const float PullBackThreshold = -0.15f;
-    const float MaxPullback = -0.40f;
-
-    readonly float[] _velocity = new float[VelocitySamples];
-
-    int _velocityIndex;
-    int _velocityCount;
-
+    float _peakForwardVelocity;
     bool _hasPulledBack;
-    Vector2 _tipOffset;
 
     public float CueStickOffset { get; private set; }
 
-    public Vector2 TipOffset => _tipOffset;
-
     public void Reset()
     {
-        _velocityIndex = 0;
-        _velocityCount = 0;
-        CueStickOffset = 0;
+        CueStickOffset = 0f;
+        _peakForwardVelocity = 0f;
         _hasPulledBack = false;
     }
 
@@ -34,44 +21,50 @@ public sealed class ShotPowerManager
         Reset();
     }
 
-    public void UpdateAim(dynamic input)
-    {
-        float tipSpeed = 0.003f;
-
-        _tipOffset.X += input.MouseDeltaX * tipSpeed;
-        _tipOffset.Y -= input.MouseDeltaY * tipSpeed;
-
-        _tipOffset = Vector2.Clamp(
-            _tipOffset,
-            new Vector2(-0.9f),
-            new Vector2(0.9f));
-    }
-
     public ShotResult UpdateStroke(InputState input, float dt)
     {
-        float movement = -input.MouseDeltaY;
+        // 1. Calculate physical movement with sensitivity
+        float movement = -input.MouseDeltaY * GameSettings.MouseSensitivity;
 
-        float velocity = movement / dt;
+        // 2. Calculate instantaneous velocity (protect against divide-by-zero)
+        float currentVelocity = movement / Math.Max(dt, 0.0001f);
 
-        TrackVelocity(velocity);
+        // 3. Track peak forward velocity for realistic power
+        if (currentVelocity > 0)
+        {
+            _peakForwardVelocity = Math.Max(_peakForwardVelocity, currentVelocity);
+        }
+        else if (currentVelocity < -0.001f)
+        {
+            // If the player starts pulling back again, reset the forward momentum
+            _peakForwardVelocity = 0;
+        }
 
+        // 4. Apply movement to the cue stick
         float previousOffset = CueStickOffset;
-
         CueStickOffset += movement;
 
-        CueStickOffset = Math.Clamp(CueStickOffset, MaxPullback, 0f);
+        // Only allow the cue to push into the ball (positive offset) 
+        // IF the player has already pulled back to initiate a valid shot.
+        float maxForwardAllowed = _hasPulledBack ? 0.1f : 0f;
 
-        if (CueStickOffset < PullBackThreshold)
+        CueStickOffset = Math.Clamp(CueStickOffset, GameSettings.MaxPullback, maxForwardAllowed);
+
+        if (CueStickOffset < -0.05f)
         {
             _hasPulledBack = true;
         }
 
-        bool struck = previousOffset < 0f && CueStickOffset >= 0f;
+        bool struck = _hasPulledBack && previousOffset < 0f && CueStickOffset >= 0f;
 
-        if (_hasPulledBack && struck)
+        if (struck)
         {
+            // Snap it exactly back to 0 so it doesn't render inside the cue ball
+            CueStickOffset = 0f;
             return ShotResult.Strike;
         }
+
+
 
         if (input.Keys[(int)ConsoleKey.Escape])
         {
@@ -83,26 +76,7 @@ public sealed class ShotPowerManager
         return ShotResult.None;
     }
 
-    void TrackVelocity(float v)
-    {
-        if (v > 0)
-        {
-            _velocity[_velocityIndex] = v;
-
-            _velocityIndex = (_velocityIndex + 1) % VelocitySamples;
-
-            if (_velocityCount < VelocitySamples)
-            {
-                _velocityCount++;
-            }
-        }
-        else if (v < -0.5f)
-        {
-            _velocityCount = 0;
-        }
-    }
-
-    public Shot BuildShot(dynamic camera)
+    public Shot BuildShot(Camera camera, Vector2 tipOffset)
     {
         float power = CalculateImpactSpeed();
 
@@ -112,7 +86,7 @@ public sealed class ShotPowerManager
                 0,
                 -MathF.Cos(camera.Yaw)));
 
-        var shot = new Shot(dir, power, _tipOffset);
+        var shot = new Shot(dir, power, tipOffset);
 
         Reset();
 
@@ -121,20 +95,11 @@ public sealed class ShotPowerManager
 
     float CalculateImpactSpeed()
     {
-        if (_velocityCount == 0)
-        {
-            return 0;
-        }
+        // Tune this multiplier until a fast mouse swipe feels like a break shot
+        float velocityToPowerMultiplier = 1.5f;
 
-        float total = 0;
+        float finalPower = _peakForwardVelocity * velocityToPowerMultiplier;
 
-        for (int i = 0; i < _velocityCount; i++)
-        {
-            total += _velocity[i];
-        }
-
-        float avg = total / _velocityCount;
-
-        return Math.Clamp(avg, 0f, 10f);
+        return Math.Clamp(finalPower, 0.1f, GameSettings.MaxImpactSpeed);
     }
 }
