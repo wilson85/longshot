@@ -231,7 +231,7 @@ public sealed class BilliardsEngine : IDisposable
                         ball.HitMarksWorld[ball.HitMarkIndex] = floorHit;
                         ball.HitMarkIndex = (ball.HitMarkIndex + 1) % ball.HitMarksWorld.Length;
 
-                        RetroAudio.PlayImpact(deltaV.Length() / 2f);
+                        RetroAudio.PlayBallImpact(deltaV.Length() / 2f);
 
                         break;
                     }
