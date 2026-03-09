@@ -50,7 +50,7 @@ public sealed class BilliardsEngine : IDisposable
 
     private readonly BufferPool _pool = new();
     private readonly Simulation _simulation;
-
+    private readonly CollisionTracker _collisionTracker = new();
     private readonly BodyHandle[] _ballHandles = new BodyHandle[MaxBalls];
     private readonly List<Ball> _balls = new(MaxBalls);
 
@@ -64,6 +64,7 @@ public sealed class BilliardsEngine : IDisposable
         // Assign the FloorHandle before creating the simulation.
         // The first static added will receive Handle 0.
         narrow.FloorHandle = new StaticHandle(0);
+        narrow.Tracker = _collisionTracker;
 
         // FIX: We are now passing actual Earth gravity (-9.81) to the integrator
         var integrator = new CustomPoseIntegratorCallbacks(new Vector3(0, -9.81f, 0));

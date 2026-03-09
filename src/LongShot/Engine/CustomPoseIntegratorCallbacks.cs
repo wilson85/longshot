@@ -60,6 +60,7 @@ public struct CustomPoseIntegratorCallbacks : IPoseIntegratorCallbacks
 public struct CustomNarrowPhaseCallbacks : INarrowPhaseCallbacks
 {
     public StaticHandle FloorHandle;
+    public CollisionTracker Tracker;
 
     // Phenolic Resin (Balls) - Very hard, perfectly elastic
     static readonly PairMaterialProperties BallBallMaterial = new()
@@ -103,29 +104,29 @@ public struct CustomNarrowPhaseCallbacks : INarrowPhaseCallbacks
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool ConfigureContactManifold<TManifold>(
-        int workerIndex,
-        CollidablePair pair,
-        ref TManifold manifold,
-        out PairMaterialProperties pairMaterial)
-        where TManifold : unmanaged, IContactManifold<TManifold>
+    public bool ConfigureContactManifold<TManifold>(int workerIndex, CollidablePair pair, ref TManifold manifold, out PairMaterialProperties pairMaterial) where TManifold : unmanaged, IContactManifold<TManifold>
     {
-        if (pair.A.Mobility == CollidableMobility.Dynamic &&
-            pair.B.Mobility == CollidableMobility.Dynamic)
+        // 1. MATERIAL SETUP
+        if (pair.A.Mobility == CollidableMobility.Dynamic && pair.B.Mobility == CollidableMobility.Dynamic)
         {
             pairMaterial = BallBallMaterial;
-            return true;
+        }
+        else
+        {
+            var staticHandle = pair.A.Mobility == CollidableMobility.Static ? pair.A.StaticHandle : pair.B.StaticHandle;
+            pairMaterial = staticHandle == FloorHandle ? ClothMaterial : CushionMaterial;
         }
 
-        var staticHandle =
-            pair.A.Mobility == CollidableMobility.Static
-            ? pair.A.StaticHandle
-            : pair.B.StaticHandle;
-
-        pairMaterial =
-            staticHandle == FloorHandle
-            ? ClothMaterial
-            : CushionMaterial;
+        // 2. REPORT TO COLLISION TRACKER
+        // We do this during the narrow phase to guarantee we know *what* we are touching, 
+        // before the solver instantly resolves the bouncing velocities!
+        if (Tracker != null)
+        {
+            if (pair.A.Mobility == CollidableMobility.Dynamic)
+                Tracker.RecordContact(pair.A.BodyHandle, pair.B, FloorHandle);
+            if (pair.B.Mobility == CollidableMobility.Dynamic)
+                Tracker.RecordContact(pair.B.BodyHandle, pair.A, FloorHandle);
+        }
 
         return true;
     }
@@ -144,4 +145,44 @@ public struct CustomNarrowPhaseCallbacks : INarrowPhaseCallbacks
         ref ConvexContactManifold manifold) => true;
 
     public void Dispose() { }
+}
+
+public class CollisionTracker
+{
+    public BodyHandle[] BallHandles;
+
+    // Bitmask for tracking ball-to-ball collisions (Max 16 balls fits in an int)
+    public int[] BallContactMask = new int[16];
+
+    // Simple boolean flag for cushion hits
+    public bool[] CushionContacts = new bool[16];
+
+    public void Clear()
+    {
+        Array.Clear(BallContactMask);
+        Array.Clear(CushionContacts);
+    }
+
+    public void RecordContact(BodyHandle dynamicBody, CollidableReference other, StaticHandle floorHandle)
+    {
+        if (BallHandles == null) return;
+
+        int ballId = Array.IndexOf(BallHandles, dynamicBody);
+        if (ballId == -1) return;
+
+        if (other.Mobility == CollidableMobility.Dynamic)
+        {
+            int otherBallId = Array.IndexOf(BallHandles, other.BodyHandle);
+            if (otherBallId != -1)
+            {
+                // Safely flag that these two balls are touching using bitwise logic
+                Interlocked.Or(ref BallContactMask[ballId], 1 << otherBallId);
+            }
+        }
+        else if (other.Mobility == CollidableMobility.Static && other.StaticHandle != floorHandle)
+        {
+            // If it hit a static body that ISN'T the floor, it's a cushion
+            CushionContacts[ballId] = true;
+        }
+    }
 }
