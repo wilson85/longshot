@@ -1,4 +1,5 @@
 ﻿using LongShot.Engine;
+using LongShot.Rendering;
 
 namespace LongShot.App;
 
@@ -12,6 +13,10 @@ public sealed class LongShotApp : GameApplication
     private readonly BilliardsSceneBuilder _sceneBuilder;
     private readonly RenderQueue _renderQueue = new RenderQueue();
 
+    // --- SAVE STATE ---
+    // Holds the raw Bepu memory snapshot of the table
+    private TableSnapshot _savedSnapshot;
+
     public LongShotApp(GameWindow window, DX12Renderer renderer) : base(window)
     {
         _renderer = renderer;
@@ -21,8 +26,37 @@ public sealed class LongShotApp : GameApplication
 
     protected override void Update(float dt)
     {
-        _camera.Update(Window.InputManager.State, _match.Mode, _engine.GetBallPosition(0), dt);
-        _match.Update(_engine, Window.InputManager.State, _camera, dt);
+        var input = Window.InputManager.State;
+
+        // ==========================================
+        // QUICK SAVE / QUICK LOAD
+        // ==========================================
+        // (Note: Adjust 'IsKeyPressed' and 'Key.F5' to match your specific Input framework's syntax)
+
+        if (input.IsKeyPressed((int)ConsoleKey.F5))
+        {
+            _savedSnapshot = _engine.TakeSnapshot();
+
+            // Optional: You could log to the console or trigger a UI flash here
+            System.Console.WriteLine("Table state saved!");
+        }
+
+        if (input.IsKeyPressed((int)ConsoleKey.F8) && _savedSnapshot != null)
+        {
+            _engine.RestoreSnapshot(_savedSnapshot);
+            System.Console.WriteLine("Table state loaded!");
+
+            // IMPORTANT: If you load a still table while the game was simulating, 
+            // you need to reset the game logic back to aiming!
+            // _match.ForceAimMode(); // You will need to implement something like this in MatchManager
+        }
+        // ==========================================
+
+        _camera.Update(input, _match.Mode, _engine.GetBallPosition(0), dt);
+
+        RetroAudio.UpdateListener(_camera.Position, _camera.Target - _camera.Position);
+
+        _match.Update(_engine, input, _camera, dt);
     }
 
     protected override void FixedUpdate(float dt)
@@ -53,7 +87,7 @@ public sealed class LongShotApp : GameApplication
     public override void Dispose()
     {
         base.Dispose();
-        ImGuiManager.Shutdown();
+        // ImGuiManager.Shutdown(); // (If you are still using ImGui)
         _engine?.Dispose();
     }
 }

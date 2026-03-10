@@ -1,4 +1,5 @@
-﻿using LongShot.Engine;
+﻿using System.Numerics;
+using LongShot.Engine;
 
 namespace LongShot;
 
@@ -10,6 +11,7 @@ public sealed class MatchManager
     readonly CueBallSystem _cueBall;
 
     public float CueStickOffset => _cue.CueOffset;
+    public Vector2 TipOffset => _cue.TipOffset;
 
     public MatchManager(
         CueController cue,

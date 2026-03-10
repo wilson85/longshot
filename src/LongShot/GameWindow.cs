@@ -1,4 +1,5 @@
 ﻿using System.Runtime.InteropServices;
+using LongShot.Input;
 
 namespace LongShot;
 
@@ -52,7 +53,7 @@ public sealed class GameWindow : IDisposable
 
     public bool ProcessMessages()
     {
-        InputManager.State.ResetDeltas();
+        InputManager.State.NewFrame();
         while (PeekMessage(out MSG msg, IntPtr.Zero, 0, 0, 1))
         {
             if (msg.m == 0x0012) return false; // WM_QUIT

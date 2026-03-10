@@ -1,9 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Text;
 
-namespace LongShot;
+namespace LongShot.Input;
 
 public sealed class InputManager
 {
@@ -12,6 +10,7 @@ public sealed class InputManager
     private IntPtr _hwnd;
     public bool IsCursorCaptured { get; private set; } = false;
 
+    // --- Win32 API Imports ---
     [DllImport("user32.dll")] private static extern bool RegisterRawInputDevices(RAWINPUTDEVICE[] pRawInputDevices, uint uiNumDevices, uint cbSize);
     [DllImport("user32.dll")] private static extern uint GetRawInputData(IntPtr hRawInput, uint uiCommand, IntPtr pData, ref uint pcbSize, uint cbSizeHeader);
     [DllImport("user32.dll")] private static extern int ShowCursor(bool bShow);
@@ -32,6 +31,18 @@ public sealed class InputManager
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int l, t, r, b; }
 
+    // --- Windows Message Constants ---
+    private const uint WM_INPUT = 0x00FF;
+    private const uint WM_KEYDOWN = 0x0100;
+    private const uint WM_KEYUP = 0x0101;
+    private const uint WM_MOUSEMOVE = 0x0200;
+    private const uint WM_LBUTTONDOWN = 0x0201;
+    private const uint WM_LBUTTONUP = 0x0202;
+    private const uint WM_RBUTTONDOWN = 0x0204;
+    private const uint WM_RBUTTONUP = 0x0205;
+    private const uint WM_MOUSEWHEEL = 0x020A;
+    private const uint RID_INPUT = 0x10000003;
+
     public void Initialize(IntPtr hwnd)
     {
         _hwnd = hwnd;
@@ -42,15 +53,21 @@ public sealed class InputManager
         rid[0].usUsage = 0x02;     // Mouse
         rid[0].dwFlags = 0;
         rid[0].hwndTarget = _hwnd;
-        RegisterRawInputDevices(rid, 1, (uint)Marshal.SizeOf<RAWINPUTDEVICE>());
+
+        RegisterRawInputDevices(rid, 1, (uint)Unsafe.SizeOf<RAWINPUTDEVICE>());
     }
 
     public void CaptureCursor(bool capture)
     {
         IsCursorCaptured = capture;
+
+        // Prevent infinite hangs if the internal Windows display counter gets desynced
+        int safety = 0;
+
         if (capture)
         {
-            while (ShowCursor(false) >= 0) { }
+            while (ShowCursor(false) >= 0 && safety++ < 100) { }
+
             if (GetWindowRect(_hwnd, out RECT rect))
             {
                 ClipCursor(ref rect);
@@ -58,7 +75,7 @@ public sealed class InputManager
         }
         else
         {
-            while (ShowCursor(true) < 0) { }
+            while (ShowCursor(true) < 0 && safety++ < 100) { }
             ClipCursor(IntPtr.Zero);
         }
     }
@@ -66,57 +83,65 @@ public sealed class InputManager
     public void ProcessMessage(uint msg, IntPtr w, IntPtr l)
     {
         // WM_INPUT (Raw hardware movement - avoids OS mouse ballistics)
-        if (msg == 0x00FF)
+        if (msg == WM_INPUT)
         {
             uint dataSize = 0;
-            uint headerSize = (uint)Marshal.SizeOf<RAWINPUTHEADER>();
-            GetRawInputData(l, 0x10000003, IntPtr.Zero, ref dataSize, headerSize);
+            uint headerSize = (uint)Unsafe.SizeOf<RAWINPUTHEADER>();
+            GetRawInputData(l, RID_INPUT, IntPtr.Zero, ref dataSize, headerSize);
 
             if (dataSize > 0)
             {
-                IntPtr rawInputPtr = Marshal.AllocHGlobal((int)dataSize);
-                if (GetRawInputData(l, 0x10000003, rawInputPtr, ref dataSize, headerSize) == dataSize)
+                // PERFORMANCE FIX: We use stackalloc and unsafe pointers to read the struct directly. 
+                // This removes ALL garbage collection allocations when moving the mouse!
+                unsafe
                 {
-                    RAWINPUTHEADER header = Marshal.PtrToStructure<RAWINPUTHEADER>(rawInputPtr);
-                    if (header.dwType == 0) // RIM_TYPEMOUSE
-                    {
-                        IntPtr mousePtr = IntPtr.Add(rawInputPtr, (int)headerSize);
-                        RAWMOUSE rawMouse = Marshal.PtrToStructure<RAWMOUSE>(mousePtr);
+                    byte* rawInputPtr = stackalloc byte[(int)dataSize];
 
-                        State.MouseDeltaX += rawMouse.lLastX;
-                        State.MouseDeltaY += rawMouse.lLastY;
+                    if (GetRawInputData(l, RID_INPUT, (IntPtr)rawInputPtr, ref dataSize, headerSize) == dataSize)
+                    {
+                        RAWINPUTHEADER* header = (RAWINPUTHEADER*)rawInputPtr;
+
+                        if (header->dwType == 0) // RIM_TYPEMOUSE
+                        {
+                            RAWMOUSE* rawMouse = (RAWMOUSE*)(rawInputPtr + headerSize);
+
+                            State.MouseDeltaX += rawMouse->lLastX;
+                            State.MouseDeltaY += rawMouse->lLastY;
+                        }
                     }
                 }
-                Marshal.FreeHGlobal(rawInputPtr);
             }
         }
 
         // WM_KEYDOWN
-        if (msg == 0x0100 && (ulong)w < 256)
+        if (msg == WM_KEYDOWN && (ulong)w < 256)
         {
             State.Keys[(ulong)w] = true;
-            if ((ulong)w == (uint)ConsoleKey.Escape)
+
+            if ((ulong)w == 27) // Virtual Key Code for Escape
             {
                 CaptureCursor(!IsCursorCaptured);
             }
         }
 
         // WM_KEYUP
-        if (msg == 0x0101 && (ulong)w < 256)
+        if (msg == WM_KEYUP && (ulong)w < 256)
         {
             State.Keys[(ulong)w] = false;
         }
 
         // WM_MOUSEWHEEL
-        if (msg == 0x020A)
+        if (msg == WM_MOUSEWHEEL)
         {
             State.MouseWheelDelta += (short)((ulong)w >> 16);
         }
 
         // WM_MOUSEMOVE
-        if (msg == 0x0200)
+        if (msg == WM_MOUSEMOVE)
         {
-            int x = (short)((long)l & 0xFFFF), y = (short)(((long)l >> 16) & 0xFFFF);
+            int x = (short)((long)l & 0xFFFF);
+            int y = (short)(((long)l >> 16) & 0xFFFF);
+
             State.MouseX = x;
             State.MouseY = y;
 
@@ -134,16 +159,14 @@ public sealed class InputManager
             }
         }
 
-        // WM_LBUTTONDOWN / UP
-        if (msg == 0x0201) State.IsLeftMouseDown = true;
-        if (msg == 0x0202) State.IsLeftMouseDown = false;
-
-        // WM_RBUTTONDOWN / UP
-        if (msg == 0x0204) State.IsRightMouseDown = true;
-        if (msg == 0x0205) State.IsRightMouseDown = false;
+        // Mouse Button States
+        if (msg == WM_LBUTTONDOWN) State.IsLeftMouseDown = true;
+        if (msg == WM_LBUTTONUP) State.IsLeftMouseDown = false;
+        if (msg == WM_RBUTTONDOWN) State.IsRightMouseDown = true;
+        if (msg == WM_RBUTTONUP) State.IsRightMouseDown = false;
 
         // Auto-recapture mouse if user clicks inside the window
-        if ((msg == 0x0201 || msg == 0x0204) && !IsCursorCaptured)
+        if ((msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN) && !IsCursorCaptured)
         {
             CaptureCursor(true);
         }

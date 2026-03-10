@@ -1,56 +1,40 @@
 ﻿using System.Numerics;
-using LongShot;
 using LongShot.Engine;
 
-public sealed class CueBallSystem(BilliardsEngine _engine)
-{
-    const int CueBallId = 0;
-    const float BallMass = 0.17f;
+namespace LongShot;
 
-    const float SpinMultiplier = 0.002f;
+public class CueBallSystem
+{
+    private readonly BilliardsEngine _engine;
+
+    public CueBallSystem(BilliardsEngine engine)
+    {
+        _engine = engine;
+    }
 
     public void ApplyShot(Shot shot)
     {
-        _engine.ClearTrails();
+        Vector3 forward = shot.Direction;
+        float power = shot.Power;
 
-        var dir = Vector3.Normalize(shot.Direction);
-        ApplyLinearImpulse(dir, shot.Power);
+        // 1. Calculate the Linear push (The ball moving forward)
+        Vector3 linearImpulse = forward * power;
 
-        // Pass the direction into the spin calculator so we can find the local axes
-        ApplySpin(shot.TipOffset, shot.Power, dir);
-    }
+        // 2. Calculate the Right and Up vectors relative to the shot direction
+        Vector3 right = Vector3.Normalize(Vector3.Cross(Vector3.UnitY, forward));
+        Vector3 up = Vector3.Cross(forward, right);
 
-    void ApplyLinearImpulse(Vector3 direction, float power)
-    {
-        var impulse = direction * (power * BallMass);
-        _engine.ApplyImpulse(CueBallId, impulse);
-    }
+        // 3. Convert the normalized 2D TipOffset (-1 to 1) into physical 3D world space
+        // We multiply by the ball's radius so the math matches the physical mesh
+        float radius = GameSettings.StandardBallRadius;
+        Vector3 worldTipOffset = (right * shot.TipOffset.X * radius) + (up * shot.TipOffset.Y * radius);
 
-    void ApplySpin(Vector2 tipOffset, float power, Vector3 shotDirection)
-    {
-        Vector3 forward = shotDirection;
-        Vector3 right = Vector3.Normalize(Vector3.Cross(forward, Vector3.UnitY));
-        Vector3 up = Vector3.UnitY;
+        // 4. Calculate the Spin! (Cross product of the offset vector and the force vector)
+        // Multiplying by a constant (e.g., 50f) lets you tune how "grippy" the cue tip is.
+        Vector3 angularImpulse = Vector3.Cross(worldTipOffset, linearImpulse) * 30f;
 
-        float R = GameSettings.StandardBallRadius;
-
-        // We know the player can hit up to 60% of the radius away from center
-        float hitX = tipOffset.X * (R * 0.6f);
-        float hitY = tipOffset.Y * (R * 0.6f);
-
-        // Pythagorean theorem to find the Z-depth on the sphere's surface
-        float hitZ = MathF.Sqrt((R * R) - (hitX * hitX) - (hitY * hitY));
-
-        // The cue hits the BACK of the ball relative to the shot direction
-        Vector3 worldHitOffset = (right * hitX) + (up * hitY) - (forward * hitZ);
-
-        // Send it to the engine to permanently mark the ball
-        _engine.SetChalkMark(CueBallId, worldHitOffset);
-
-        // Pure Physics: Angular Impulse = r x F
-        Vector3 linearImpulse = forward * (power * BallMass);
-        Vector3 angularImpulse = Vector3.Cross(worldHitOffset, linearImpulse);
-
-        _engine.ApplyAngularImpulse(CueBallId, angularImpulse);
+        // 5. Apply BOTH to BepuPhysics!
+        _engine.ApplyImpulse(0, linearImpulse);
+        _engine.ApplyAngularImpulse(0, angularImpulse);
     }
 }

@@ -21,7 +21,7 @@ public class Camera
         Up = Vector3.UnitY;
 
         // Handle Aiming (No mouse button required, Shift for fine adjust)
-        if (mode == GameStateMode.Aim)
+        if (mode == GameStateMode.Aim && !input.Keys[(int)ConsoleKey.E])
         {
             float sensitivity = input.Keys[16] 
                 ? GameSettings.MouseSensitivityAimFine 

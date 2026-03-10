@@ -1,4 +1,5 @@
 ﻿using System.Numerics;
+using LongShot.Rendering;
 
 namespace LongShot.Engine;
 
@@ -75,7 +76,7 @@ public sealed class BilliardsSceneBuilder(
                 queue.Add(new RenderItem
                 {
                     Mesh = MeshType.Circle, // Switch to our new perfect circle!
-                    Material = MaterialType.Trail,
+                    Material = MaterialType.HitMark,
                     Color = new Vector4(1.0f, 0.9f, 0.2f, 0.8f),
                     World = Matrix4x4.CreateScale(shadowSize, 1.0f, shadowSize) * Matrix4x4.CreateTranslation(hit)
                 });
@@ -102,7 +103,7 @@ public sealed class BilliardsSceneBuilder(
         float railY = bedY + (railHeight / 2f) - (bedThickness / 4f);
 
         Vector4 bedColor = new Vector4(0.0f, 0.0f, 0.0f, 1.0f);
-        Vector4 railColor = new Vector4(0.0f, 0.8f, 1.0f, 1.0f); 
+        Vector4 railColor = new Vector4(0.0f, 0.8f, 1.0f, 1.0f);
 
         // 1. Add the Playing Surface (Bed)
         queue.Add(new RenderItem
@@ -145,7 +146,7 @@ public sealed class BilliardsSceneBuilder(
         return new RenderItem
         {
             Mesh = MeshType.Cube,
-            Material = MaterialType.Table,
+            Material = MaterialType.Cushion,
             Color = color,
             World = Matrix4x4.CreateScale(scale) * Matrix4x4.CreateTranslation(position)
         };
@@ -155,18 +156,30 @@ public sealed class BilliardsSceneBuilder(
     {
         var cueBall = engine.ActiveBalls[0];
 
-        // Assuming your Camera class exposes Yaw. 
-        // If not, you can calculate it from camera.Target - cueBall.Position
+        // 1. Calculate the Left/Right/Up/Down shift for ENGLISH
+        Vector3 forward = new Vector3(-MathF.Sin(camera.Yaw), 0, -MathF.Cos(camera.Yaw));
+        Vector3 right = Vector3.Normalize(Vector3.Cross(Vector3.UnitY, forward));
+        Vector3 up = Vector3.Cross(forward, right);
+
+        // FIX: Multiply the offset by the physical ball radius!
+        // This takes the 0.6 Max English clamp and shrinks it to the physical size of the ball.
+        float radius = GameSettings.StandardBallRadius;
+        Vector3 tipWorldOffset = (right * match.TipOffset.X * radius) + (up * match.TipOffset.Y * radius);
+
+        Vector3 shiftedTargetPos = cueBall.Position + tipWorldOffset;
+
+        // 2. Solve the final matrix using the shifted position and the PULLBACK offset
         Matrix4x4 cueWorldMatrix = CuePoseSolver.Solve(
-            cueBall.Position,
+            shiftedTargetPos,
+            camera.Pitch,
             camera.Yaw,
-            match.CueStickOffset);
+            match.CueStickOffset); // Uses CueStickOffset (float) for the pullback
 
         queue.Add(new RenderItem
         {
-            Mesh = MeshType.Cube, // or MeshType.Cylinder if you have one!
-            Material = MaterialType.Cue, // Update this if you have a specific material
-            Color = new Vector4(0.8f, 0.6f, 0.3f, 1), // A nice wood color
+            Mesh = MeshType.Cylinder,
+            Material = MaterialType.Cue,
+            Color = new Vector4(0.0f, 0.8f, 1.0f, 1.0f),
             World = cueWorldMatrix
         });
     }

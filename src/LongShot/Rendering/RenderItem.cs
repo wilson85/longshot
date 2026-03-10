@@ -1,13 +1,14 @@
 ﻿using System.Numerics;
 
-namespace LongShot.Engine;
+namespace LongShot.Rendering;
 
 public enum MeshType
 {
     Cube,
     Sphere, 
     Quad,
-    Circle
+    Circle,
+    Cylinder
 }
 
 public enum MaterialType
@@ -16,7 +17,8 @@ public enum MaterialType
     Cushion = 1,
     Ball = 2,
     Cue = 3,
-    Trail = 4
+    Trail = 4,
+    HitMark = 5
 }
 
 public struct RenderItem

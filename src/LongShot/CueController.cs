@@ -1,4 +1,5 @@
-﻿using System.Numerics;
+﻿using System;
+using System.Numerics;
 
 namespace LongShot;
 
@@ -6,9 +7,7 @@ public sealed class CueController
 {
     readonly ShotPowerManager _power = new();
 
-    // Changed to a public property so we can read it for the UI later!
     public Vector2 TipOffset { get; private set; }
-
     public float CueOffset => _power.CueStickOffset;
 
     public void UpdateAim(InputState input)
@@ -16,13 +15,24 @@ public sealed class CueController
         // ONLY move the tip offset if the player is holding E
         if (input.Keys[(int)ConsoleKey.E])
         {
-            float speed = 0.003f;
+            // 1. FIXED SPEED: Lowered from 0.003f for finer control
+            float speed = 0.0005f;
             var offset = TipOffset;
 
-            offset.X += input.MouseDeltaX * speed;
+            // 2. FIXED INVERSION: Subtracted DeltaX to flip left/right
+            offset.X -= input.MouseDeltaX * speed;
             offset.Y -= input.MouseDeltaY * speed;
 
-            TipOffset = Vector2.Clamp(offset, new Vector2(-0.9f), new Vector2(0.9f));
+            // 3. FIXED CLAMPING: Use a circular clamp instead of a square clamp!
+            // This prevents the tip from going into the corners past the edge of the ball.
+            // 0.85f means the max english is 85% of the way to the edge (prevents miscueing).
+            float maxRadius = 0.6f;
+            if (offset.LengthSquared() > maxRadius * maxRadius)
+            {
+                offset = Vector2.Normalize(offset) * maxRadius;
+            }
+
+            TipOffset = offset;
         }
     }
 
@@ -31,10 +41,9 @@ public sealed class CueController
 
     public Shot BuildShot(Camera camera)
     {
-        // Pass the TipOffset down to build the shot
         var shot = _power.BuildShot(camera, TipOffset);
 
-        // CRITICAL FIX: Reset the spin back to dead-center after the strike!
+        // Reset the spin back to dead-center after the strike!
         TipOffset = Vector2.Zero;
 
         return shot;

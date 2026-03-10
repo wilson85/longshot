@@ -1,6 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 
-namespace LongShot.Engine;
+namespace LongShot.Rendering;
 
 public sealed class RenderQueue
 {

@@ -1,4 +1,5 @@
-﻿using System.Numerics;
+﻿using System;
+using System.Numerics;
 
 namespace LongShot;
 
@@ -18,36 +19,29 @@ public sealed class ShotPowerManager
 
     public void BeginStroke()
     {
-        Reset();
+        CueStickOffset = 0f;
+        _peakForwardVelocity = 0f;
+        _hasPulledBack = false;
     }
 
     public ShotResult UpdateStroke(InputState input, float dt)
     {
-        // 1. Calculate physical movement with sensitivity
         float movement = -input.MouseDeltaY * GameSettings.MouseSensitivity;
-
-        // 2. Calculate instantaneous velocity (protect against divide-by-zero)
         float currentVelocity = movement / Math.Max(dt, 0.0001f);
 
-        // 3. Track peak forward velocity for realistic power
         if (currentVelocity > 0)
         {
             _peakForwardVelocity = Math.Max(_peakForwardVelocity, currentVelocity);
         }
         else if (currentVelocity < -0.001f)
         {
-            // If the player starts pulling back again, reset the forward momentum
             _peakForwardVelocity = 0;
         }
 
-        // 4. Apply movement to the cue stick
         float previousOffset = CueStickOffset;
         CueStickOffset += movement;
 
-        // Only allow the cue to push into the ball (positive offset) 
-        // IF the player has already pulled back to initiate a valid shot.
         float maxForwardAllowed = _hasPulledBack ? 0.1f : 0f;
-
         CueStickOffset = Math.Clamp(CueStickOffset, GameSettings.MaxPullback, maxForwardAllowed);
 
         if (CueStickOffset < -0.05f)
@@ -59,16 +53,13 @@ public sealed class ShotPowerManager
 
         if (struck)
         {
-            // Snap it exactly back to 0 so it doesn't render inside the cue ball
             CueStickOffset = 0f;
             return ShotResult.Strike;
         }
 
-
-
-        if (input.Keys[(int)ConsoleKey.Escape])
+        // 27 is Escape
+        if (input.IsKeyPressed(27))
         {
-            input.Keys[(int)ConsoleKey.Escape] = false;
             Reset();
             return ShotResult.Cancel;
         }
@@ -76,6 +67,7 @@ public sealed class ShotPowerManager
         return ShotResult.None;
     }
 
+    // UPDATED: Now accepts the tipOffset from the CueController!
     public Shot BuildShot(Camera camera, Vector2 tipOffset)
     {
         float power = CalculateImpactSpeed();
@@ -95,11 +87,8 @@ public sealed class ShotPowerManager
 
     float CalculateImpactSpeed()
     {
-        // Tune this multiplier until a fast mouse swipe feels like a break shot
         float velocityToPowerMultiplier = 1.5f;
-
         float finalPower = _peakForwardVelocity * velocityToPowerMultiplier;
-
         return Math.Clamp(finalPower, 0.1f, GameSettings.MaxImpactSpeed);
     }
 }

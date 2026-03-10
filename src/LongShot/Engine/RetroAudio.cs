@@ -1,4 +1,5 @@
-﻿using System.Runtime.InteropServices;
+﻿using System.Numerics;
+using System.Runtime.InteropServices;
 using Vortice.Multimedia;
 using Vortice.XAudio2;
 
@@ -10,91 +11,100 @@ public static class RetroAudio
     private static IXAudio2MasteringVoice _masteringVoice;
     private static WaveFormat _format;
 
+    // --- 3D AUDIO LISTENER STATE ---
+    public static Vector3 ListenerPosition = new Vector3(0, 1.5f, -1.5f);
+    public static Vector3 ListenerForward = Vector3.UnitZ;
+
     public static void Init()
     {
         _xaudio2 = XAudio2.XAudio2Create();
-        _masteringVoice = _xaudio2.CreateMasteringVoice();
+
+        // Explicitly request 2 channels (Stereo) so our 3D panning works!
+        _masteringVoice = _xaudio2.CreateMasteringVoice(2, 44100);
         _format = new WaveFormat(44100, 16, 1);
     }
 
-    /// <summary>
-    /// Sharp, high-pitched "clack" (Square Wave + Fast Linear Decay)
-    /// </summary>
-    public static void PlayBallImpact(float impactPower)
+    public static void UpdateListener(Vector3 position, Vector3 forward)
     {
-        float power = Math.Clamp(impactPower, 0f, 10f);
-        float freq = 600f + (power * 40f);
-        float duration = 0.05f + (power * 0.01f);
-        float volume = Math.Min(power * 0.1f, 0.5f);
-
-        PlayProceduralSound(duration, volume, (time, progress) =>
-        {
-            // C64-style Square Wave
-            float wave = MathF.Sin(time * MathF.PI * 2f * freq) > 0 ? 1f : -1f;
-            // Fast linear decay
-            float envelope = 1.0f - progress;
-            return wave * envelope;
-        });
+        ListenerPosition = position;
+        ListenerForward = Vector3.Normalize(forward);
     }
 
     /// <summary>
-    /// Dull, bouncy "thud" (Sine Wave + Pitch Drop + Smooth Decay)
+    /// Sharp, high-pitched "clack" with random variation and spin friction.
     /// </summary>
-    public static void PlayRailImpact(float impactPower)
+    public static void PlayBallImpact(float impactPower, Vector3 worldPosition, float spin = 0f)
     {
         float power = Math.Clamp(impactPower, 0f, 10f);
-        float baseFreq = 150f + (power * 5f);
+
+        // 1. RANDOM VARIATION: Prevents the "machine gun" phasing effect on break shots!
+        float pitchJitter = (Random.Shared.NextSingle() * 50f) - 25f; // +/- 25Hz variance
+        float freq = 600f + (power * 40f) + pitchJitter;
+
+        float duration = 0.05f + (power * 0.01f);
+        float volume = Math.Min(power * 0.1f, 0.5f);
+
+        PlayProceduralSound(duration, volume, worldPosition, (time, progress) =>
+        {
+            // Core clack (Square wave)
+            float wave = MathF.Sin(time * MathF.PI * 2f * freq) > 0 ? 1f : -1f;
+
+            // 2. SPIN EFFECT: Mix in a burst of white noise if the ball is spinning rapidly
+            float frictionNoise = 0f;
+            if (spin > 2f)
+            {
+                // The faster the spin, the louder the "grinding" friction noise mix
+                float noiseVolume = Math.Min(spin * 0.015f, 0.4f);
+                frictionNoise = (Random.Shared.NextSingle() * 2f - 1f) * noiseVolume;
+            }
+
+            float envelope = 1.0f - progress;
+            return (wave + frictionNoise) * envelope;
+        });
+    }
+
+    public static void PlayRailImpact(float impactPower, Vector3 worldPosition)
+    {
+        float power = Math.Clamp(impactPower, 0f, 10f);
+
+        // Add a tiny bit of random variation to rails too!
+        float pitchJitter = (Random.Shared.NextSingle() * 10f) - 5f;
+        float baseFreq = 150f + (power * 5f) + pitchJitter;
+
         float duration = 0.1f + (power * 0.02f);
         float volume = Math.Min(power * 0.15f, 0.6f);
 
-        PlayProceduralSound(duration, volume, (time, progress) =>
+        PlayProceduralSound(duration, volume, worldPosition, (time, progress) =>
         {
-            // Pitch drops slightly as energy is absorbed by the cushion
             float currentFreq = baseFreq * (1.0f - (progress * 0.4f));
-            // Sine wave for softer rubber feel
             float wave = MathF.Sin(time * MathF.PI * 2f * currentFreq);
-            // Quadratic envelope for a softer attack/release curve
             float envelope = MathF.Pow(1.0f - progress, 1.5f);
             return wave * envelope;
         });
     }
 
-    /// <summary>
-    /// Woody "thwack" (Triangle Wave + Initial Noise Burst + Steep Decay)
-    /// </summary>
-    public static void PlayCueImpact(float impactPower)
+    public static void PlayCueImpact(float impactPower, Vector3 worldPosition)
     {
         float power = Math.Clamp(impactPower, 0f, 10f);
         float freq = 200f + (power * 10f);
         float duration = 0.08f + (power * 0.01f);
         float volume = Math.Min(power * 0.2f, 0.7f);
 
-        PlayProceduralSound(duration, volume, (time, progress) =>
+        PlayProceduralSound(duration, volume, worldPosition, (time, progress) =>
         {
-            // Triangle wave for a hollow, wood-like resonance
             float period = 1f / freq;
             float wave = MathF.Abs((time % period) / period * 4f - 2f) - 1f;
-
-            // Add a burst of white noise at the very start to simulate the chalk/tip striking
             float noise = progress < 0.1f ? (Random.Shared.NextSingle() * 2f - 1f) * 0.4f : 0f;
-
-            // Steep exponential decay
             float envelope = MathF.Pow(1.0f - progress, 2f);
             return (wave + noise) * envelope;
         });
     }
 
-    /// <summary>
-    /// Core engine method: Handles unmanaged memory and XAudio2 buffering.
-    /// </summary>
-    /// <param name="duration">Duration of the sound in seconds.</param>
-    /// <param name="volume">Volume multiplier (0.0 to 1.0).</param>
-    /// <param name="waveGenerator">Function taking (timeInSeconds, normalizedProgress) returning amplitude (-1.0 to 1.0).</param>
-    private static void PlayProceduralSound(float duration, float volume, Func<float, float, float> waveGenerator)
+    private static void PlayProceduralSound(float duration, float volume, Vector3 worldPosition, Func<float, float, float> waveGenerator)
     {
         int sampleRate = _format.SampleRate;
         int totalSamples = (int)(sampleRate * duration);
-        int byteCount = totalSamples * 2; // 16-bit audio = 2 bytes per sample
+        int byteCount = totalSamples * 2;
 
         IntPtr audioDataPtr = Marshal.AllocHGlobal(byteCount);
 
@@ -107,17 +117,42 @@ public static class RetroAudio
                 float time = i / (float)sampleRate;
                 float progress = (float)i / totalSamples;
 
-                // Get waveform sample from the lambda
                 float sample = waveGenerator(time, progress);
-
-                // Apply master volume and clamp to prevent clipping distortion
-                sample = Math.Clamp(sample * volume, -1f, 1f);
+                sample = Math.Clamp(sample, -1f, 1f);
 
                 pSamples[i] = (short)(sample * short.MaxValue);
             }
         }
 
         IXAudio2SourceVoice voice = _xaudio2.CreateSourceVoice(_format);
+
+        // ==========================================
+        // 3D SPATIALIZATION MATH
+        // ==========================================
+        Vector3 dirToSound = worldPosition - ListenerPosition;
+        float distance = dirToSound.Length();
+
+        if (distance > 0.001f)
+            dirToSound /= distance;
+        else
+            dirToSound = ListenerForward;
+
+        float distanceAttenuation = 1.0f / (1.0f + distance * 0.8f);
+
+        Vector3 listenerRight = Vector3.Cross(Vector3.UnitY, ListenerForward);
+        if (listenerRight.LengthSquared() < 0.001f) listenerRight = Vector3.UnitX;
+        else listenerRight = Vector3.Normalize(listenerRight);
+
+        float pan = Vector3.Dot(dirToSound, listenerRight);
+
+        float panAngle = (pan + 1f) * MathF.PI / 4f;
+
+        float leftVol = MathF.Cos(panAngle) * distanceAttenuation * volume;
+        float rightVol = MathF.Sin(panAngle) * distanceAttenuation * volume;
+
+        float[] outputMatrix = new float[] { leftVol, rightVol };
+        voice.SetOutputMatrix(_masteringVoice, 1, 2, outputMatrix);
+        // ==========================================
 
         var buffer = new AudioBuffer
         {
