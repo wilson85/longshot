@@ -12,7 +12,7 @@ public abstract class GameApplication(GameWindow window) : IDisposable
 
         long lastTime = Stopwatch.GetTimestamp();
         double accumulator = 0.0;
-        const double FixedDeltaTime = 1.0 / 120.0;
+        const double FixedDeltaTime = 1f / 240f;
 
         while (Window.ProcessMessages())
         {

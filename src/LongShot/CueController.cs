@@ -6,7 +6,8 @@ namespace LongShot;
 public sealed class CueController
 {
     readonly ShotPowerManager _power = new();
-
+    public float PreviousCueOffset => _power.PreviousCueStickOffset;
+    public bool HasPulledBack => _power.HasPulledBack;
     public Vector2 TipOffset { get; private set; }
     public float CueOffset => _power.CueStickOffset;
 

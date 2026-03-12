@@ -11,5 +11,7 @@ public static class GameSettings
 
     public const float MaxPullback = -0.80f;
     public const float MouseSensitivity = 0.0002f;
-    public const float MaxImpactSpeed = 9.0f; 
+    public const float MaxImpactSpeed = 9.0f;
+
+    public static float MaxShotPower = 100f;
 }

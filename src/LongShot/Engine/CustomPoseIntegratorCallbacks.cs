@@ -35,22 +35,22 @@ public struct CustomPoseIntegratorCallbacks : IPoseIntegratorCallbacks
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void IntegrateVelocity(
-        Vector<int> bodyIndices,
-        Vector3Wide position,
-        QuaternionWide orientation,
-        BodyInertiaWide localInertia,
-        Vector<int> integrationMask,
-        int workerIndex,
-        Vector<float> dt,
-        ref BodyVelocityWide velocity)
+    Vector<int> bodyIndices,
+    Vector3Wide position,
+    QuaternionWide orientation,
+    BodyInertiaWide localInertia,
+    Vector<int> integrationMask,
+    int workerIndex,
+    Vector<float> dt,
+    ref BodyVelocityWide velocity)
     {
-        // Inside IntegrateVelocity:
-        var linearDrag = Vector.Max(Vector<float>.Zero, Broadcast(1f) - Broadcast(0.02f) * dt);
-        var angularDrag = Vector.Max(Vector<float>.Zero, Broadcast(1f) - Broadcast(0.05f) * dt);
+        // Custom billiards cloth physics
+        BilliardsMotion.Integrate(
+            ref velocity.Linear,
+            ref velocity.Angular,
+            dt);
 
-        velocity.Linear *= linearDrag;
-        velocity.Angular *= angularDrag;
-
+        // Gravity (mostly unused for pool table)
         velocity.Linear.X += _gravityWide.X * dt;
         velocity.Linear.Y += _gravityWide.Y * dt;
         velocity.Linear.Z += _gravityWide.Z * dt;
@@ -65,7 +65,7 @@ public struct CustomNarrowPhaseCallbacks : INarrowPhaseCallbacks
     // Phenolic Resin (Balls) - Very hard, perfectly elastic
     static readonly PairMaterialProperties BallBallMaterial = new()
     {
-        FrictionCoefficient = 0.005f,
+        FrictionCoefficient = 0.002f,
         MaximumRecoveryVelocity = float.MaxValue,
         SpringSettings = new SpringSettings(600, 0.0f)
     };

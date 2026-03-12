@@ -84,7 +84,7 @@ public sealed class BilliardsEngine : IDisposable
             _pool,
             narrow,
             integrator,
-            new SolveDescription(4, 16));
+            new SolveDescription(12, 2));
 
         CreateTable();
         CreateBalls();
@@ -226,6 +226,15 @@ public sealed class BilliardsEngine : IDisposable
         var body = _simulation.Bodies.GetBodyReference(_ballHandles[id]);
         BepuUtilities.Symmetric3x3.TransformWithoutOverlap(angularImpulse, body.LocalInertia.InverseInertiaTensor, out var velocityChange);
         body.Velocity.Angular += velocityChange;
+
+        const float maxSpin = 120f;
+
+        var spin = body.Velocity.Angular.Length();
+        if (spin > maxSpin)
+        {
+            body.Velocity.Angular *= maxSpin / spin;
+        }
+
         body.Awake = true;
     }
 
@@ -269,6 +278,25 @@ public sealed class BilliardsEngine : IDisposable
                         }
 
                         Vector3 hitPos = (ball.Position + ballsSpan[j].Position) / 2f;
+
+
+                        var bodyA = _simulation.Bodies.GetBodyReference(_ballHandles[i]);
+                        var bodyB = _simulation.Bodies.GetBodyReference(_ballHandles[j]);
+
+                        Vector3 spinA = bodyA.Velocity.Angular;
+
+                        Vector3 contactNormal = Vector3.Normalize(ballsSpan[j].Position - ball.Position);
+
+                        // tangential spin component
+                        Vector3 tangentialSpin = Vector3.Cross(spinA, contactNormal);
+
+                        // transfer small portion
+                        const float spinTransfer = 0.02f;
+
+                        bodyB.Velocity.Linear += tangentialSpin * spinTransfer;
+                        bodyA.Velocity.Angular *= 0.98f;
+
+
                         float spinMagnitude = ball.AngularVelocity.Length();
                         RetroAudio.PlayBallImpact(force * 1.5f, hitPos, spinMagnitude);
                     }
@@ -277,7 +305,14 @@ public sealed class BilliardsEngine : IDisposable
                 if (_collisionTracker.CushionContacts[i])
                 {
                     RetroAudio.PlayRailImpact(force * 1.5f, ball.Position);
-                    body.Velocity.Angular *= 0.5f;
+
+                    Vector3 v = body.Velocity.Linear;
+
+                    Vector3 tangent = Vector3.Cross(Vector3.UnitY, v);
+
+                    body.Velocity.Linear += tangent * body.Velocity.Angular.Y * 0.02f;
+
+                    body.Velocity.Angular *= 0.8f;
                 }
             }
 
@@ -316,31 +351,88 @@ public sealed class BilliardsEngine : IDisposable
 
     private void ApplyTableFriction(BodyReference body, float dt)
     {
-        float linearSpeed = body.Velocity.Linear.Length();
-        float angularSpeed = body.Velocity.Angular.Length();
+        const float radius = GameSettings.StandardBallRadius;
 
-        float sideSpin = body.Velocity.Angular.Y;
-        if (MathF.Abs(sideSpin) > 0.1f && linearSpeed > 0.01f)
+        Vector3 v = body.Velocity.Linear;
+        Vector3 w = body.Velocity.Angular;
+
+        float linearSpeed = v.Length();
+        float spinSpeed = w.Length();
+
+        if (linearSpeed < 0.0005f && spinSpeed < 0.05f)
         {
-            Vector3 forward = body.Velocity.Linear / linearSpeed;
-            Vector3 swerveDir = Vector3.Cross(forward, Vector3.UnitY);
-            body.Velocity.Linear += swerveDir * sideSpin * 0.05f * dt;
+            body.Velocity.Linear = Vector3.Zero;
+            body.Velocity.Angular = Vector3.Zero;
+            return;
         }
 
-        float baseFriction = 0.4f * dt;
+        Vector3 contact = new(0, -radius, 0);
 
-        if (linearSpeed > 0)
+        // velocity at cloth contact point
+        Vector3 surfaceVelocity = v + Vector3.Cross(w, contact);
+        float surfaceSpeed = surfaceVelocity.Length();
+
+        // tuned constants
+        const float slidingFriction = 1.1f;   // sliding → rolling transition
+        const float rollingDecel = 0.8f;      // m/s² rolling resistance
+        const float spinDecel = 12f;          // rad/s² spin decay
+
+        if (surfaceSpeed > 0.01f)
         {
-            float newSpeed = MathF.Max(0, linearSpeed - baseFriction);
-            body.Velocity.Linear *= (newSpeed / linearSpeed);
+            // sliding phase
+            Vector3 dir = surfaceVelocity / surfaceSpeed;
+
+            Vector3 friction = -dir * slidingFriction;
+
+            body.Velocity.Linear += friction * dt;
+
+            // convert sliding into spin
+            Vector3 torque = Vector3.Cross(contact, friction);
+
+            body.Velocity.Angular += torque * dt;
+        }
+        else
+        {
+            // rolling resistance (constant deceleration)
+            if (linearSpeed > 0f)
+            {
+                float newSpeed = MathF.Max(0f, linearSpeed - rollingDecel * dt);
+                body.Velocity.Linear *= newSpeed / linearSpeed;
+            }
         }
 
-        if (angularSpeed > 0)
+        // spin decay (stronger than before)
+        spinSpeed = body.Velocity.Angular.Length();
+
+        if (spinSpeed > 0f)
         {
-            float angularFriction = baseFriction / GameSettings.StandardBallRadius;
-            float newAngularSpeed = MathF.Max(0, angularSpeed - angularFriction);
-            body.Velocity.Angular *= (newAngularSpeed / angularSpeed);
+            float newSpin = MathF.Max(0f, spinSpeed - spinDecel * dt);
+            body.Velocity.Angular *= newSpin / spinSpeed;
         }
+
+        //Vector3 desiredAngular = Vector3.Cross(Vector3.UnitY, body.Velocity.Linear) / radius;
+
+        //const float radius = GameSettings.StandardBallRadius;
+
+        Vector3 desiredSpin = Vector3.Cross(Vector3.UnitY, v) / radius;
+
+        body.Velocity.Angular =
+            Vector3.Lerp(body.Velocity.Angular, desiredSpin, 0.12f);
+
+        body.Velocity.Angular = Vector3.Lerp(
+            body.Velocity.Angular,
+            desiredSpin,
+            0.15f);
+
+        const float maxSpin = 120f;
+
+        float spin = body.Velocity.Angular.Length();
+
+        if (spin > maxSpin)
+        {
+            body.Velocity.Angular *= maxSpin / spin;
+        }
+
     }
 
     public void SetChalkMark(int id, Vector3 worldOffset)
