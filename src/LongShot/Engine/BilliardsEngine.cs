@@ -1,466 +1,498 @@
-﻿
+﻿using System;
+using System.Collections.Generic;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using BepuPhysics;
-using BepuPhysics.Collidables;
-using BepuUtilities.Memory;
+
 namespace LongShot.Engine;
 
-public struct BallSnapshot
+// ==========================================
+// 1. PURE PHYSICS DATA (AOT & Cache Friendly)
+// ==========================================
+
+public enum MotionState : byte
 {
-    public Vector3 Position;
-    public Quaternion Orientation;
-    public Vector3 LinearVelocity;
-    public Vector3 AngularVelocity;
+    Stationary = 0,
+    Sliding = 1,
+    Rolling = 2,
+    Airborne = 3
 }
 
-public class TableSnapshot
+public enum EventType : byte
 {
-    public readonly BallSnapshot[] Balls = new BallSnapshot[16];
+    None = 0,
+    StateTransition = 1, // Sliding -> Rolling -> Stationary
+    BallBallCollision = 2,
+    BallCushionCollision = 3,
+    BallSlateBounce = 4
 }
+
+// Struct of purely mathematical state. No visual data here.
+[StructLayout(LayoutKind.Sequential)]
+public struct BallState
+{
+    public Vector3 Position;
+    public Vector3 LinearVelocity;
+    public Vector3 AngularVelocity;
+    public MotionState State;
+}
+
+public readonly struct Cushion
+{
+    public readonly Vector3 Normal;
+    public readonly float DistanceFromCenter;
+
+    public Cushion(Vector3 normal, float distance)
+    {
+        Normal = Vector3.Normalize(normal);
+        DistanceFromCenter = distance;
+    }
+}
+
+public readonly struct PhysicsEvent : IComparable<PhysicsEvent>
+{
+    public readonly float Time;
+    public readonly EventType Type;
+    public readonly int BallA;
+    public readonly int BallB; // -1 if not applicable
+    public readonly int CushionIndex; // -1 if not applicable
+
+    public PhysicsEvent(float time, EventType type, int ballA, int ballB = -1, int cushionIndex = -1)
+    {
+        Time = time;
+        Type = type;
+        BallA = ballA;
+        BallB = ballB;
+        CushionIndex = cushionIndex;
+    }
+
+    public int CompareTo(PhysicsEvent other) => Time.CompareTo(other.Time);
+}
+
+// ==========================================
+// 2. RENDER & TRACKING DATA
+// ==========================================
 
 public struct TrailPoint
 {
     public Vector3 Position;
     public float Spin;
-    public Vector3 Direction; 
+    public Vector3 Direction;
 }
 
-public struct Ball
+public class BallRenderData
 {
     public int Id;
     public BallType Type;
+    public Quaternion Orientation = Quaternion.Identity;
 
-    public Vector3 Position;
-    public Quaternion Orientation;
-
-    public Vector3 LinearVelocity;
-    public Vector3 AngularVelocity;
-
-    public float LastSpeed;
-    public Vector3? ChalkMarkLocal;
-
-    // Change these from Vector3[] to TrailPoint[]
-    public TrailPoint[] Trail;
-    public int TrailIndex;
+    public TrailPoint[] Trail = new TrailPoint[128];
+    public int TrailIndex = 0;
     public Vector3 LastTrailPosition;
 
-    public Vector3[] HitMarksWorld;
-    public int HitMarkIndex;
-    public Vector3 LastLinearVelocity { get; internal set; }
+    public Vector3[] HitMarksWorld = new Vector3[8];
+    public int HitMarkIndex = 0;
+    public Vector3? ChalkMarkLocal;
 }
 
 public enum BallType { Cue, Normal }
 
-public sealed class BilliardsEngine : IDisposable
+public class TableSnapshot
+{
+    public BallState[] PhysicsStates = new BallState[16];
+    public Quaternion[] Orientations = new Quaternion[16];
+}
+
+public interface IPhysicsAudioListener
+{
+    void PlayCueImpact(float force, Vector3 position);
+    void PlayBallImpact(float force, Vector3 position, float spinMagnitude);
+    void PlayRailImpact(float force, Vector3 position);
+}
+
+// ==========================================
+// 3. THE ANALYTICAL PHYSICS ENGINE
+// ==========================================
+
+public sealed class BilliardsEngine
 {
     public const float TableWidth = 1.27f;
     public const float TableLength = 2.54f;
-    public const float CushionWidth = 0.05f;
+    public const float BallRadius = 0.028575f;
+    public const float BallMass = 0.170f;
 
     private const int MaxBalls = 16;
+    private const float EventEpsilon = 1e-5f; // Prevent infinite event loops from floating point errors
 
-    private readonly BufferPool _pool = new();
-    private readonly Simulation _simulation;
-    private readonly CollisionTracker _collisionTracker = new();
-    private readonly BodyHandle[] _ballHandles = new BodyHandle[MaxBalls];
-    private readonly List<Ball> _balls = new(MaxBalls);
+    // State Arrays (Data-Oriented)
+    private readonly BallState[] _physicsStates = new BallState[MaxBalls];
+    private readonly BallRenderData[] _renderData = new BallRenderData[MaxBalls];
+    private readonly Cushion[] _cushions = new Cushion[4];
 
-    public ReadOnlySpan<Ball> ActiveBalls => CollectionsMarshal.AsSpan(_balls);
+    private int _activeBallCount = 0;
+    private IPhysicsAudioListener? _audioListener;
 
-    private int _nextId = 0;
+    public ReadOnlySpan<BallState> PhysicsStates => new ReadOnlySpan<BallState>(_physicsStates, 0, _activeBallCount);
+    public IReadOnlyList<BallRenderData> RenderData => _renderData;
 
-    public BilliardsEngine()
+    public BilliardsEngine(IPhysicsAudioListener? audioListener = null)
     {
-        _collisionTracker.BallHandles = _ballHandles;
-
-        var narrow = new CustomNarrowPhaseCallbacks();
-        narrow.FloorHandle = new StaticHandle(0);
-        narrow.Tracker = _collisionTracker;
-
-        var integrator = new CustomPoseIntegratorCallbacks(new Vector3(0, -9.81f, 0));
-
-        _simulation = Simulation.Create(
-            _pool,
-            narrow,
-            integrator,
-            new SolveDescription(12, 2));
-
+        _audioListener = audioListener;
         CreateTable();
         CreateBalls();
     }
 
-    // ==========================================
-    // SAVE / LOAD SYSTEM
-    // ==========================================
-    public TableSnapshot TakeSnapshot()
+    public bool AreAllBallsAsleep()
     {
-        var snapshot = new TableSnapshot();
-
-        // We read directly from Bepu's memory to ensure 100% accuracy
-        for (int i = 0; i < _balls.Count; i++)
+        for (int i = 0; i < _activeBallCount; i++)
         {
-            var body = _simulation.Bodies.GetBodyReference(_ballHandles[i]);
-
-            snapshot.Balls[i] = new BallSnapshot
+            if (_physicsStates[i].State != MotionState.Stationary)
             {
-                Position = body.Pose.Position,
-                Orientation = body.Pose.Orientation,
-                LinearVelocity = body.Velocity.Linear,
-                AngularVelocity = body.Velocity.Angular
-            };
+                return false;
+            }
         }
-        return snapshot;
+        return true;
     }
 
-    public void RestoreSnapshot(TableSnapshot snapshot)
-    {
-        if (snapshot == null) return;
-
-        for (int i = 0; i < _balls.Count; i++)
-        {
-            var body = _simulation.Bodies.GetBodyReference(_ballHandles[i]);
-            ref BallSnapshot snap = ref snapshot.Balls[i];
-
-            // 1. Restore Bepu's raw physical state
-            body.Pose.Position = snap.Position;
-            body.Pose.Orientation = snap.Orientation;
-            body.Velocity.Linear = snap.LinearVelocity;
-            body.Velocity.Angular = snap.AngularVelocity;
-
-            // 2. Force the physics engine to wake the body up, just in case it went to sleep
-            body.Awake = true;
-
-            // 3. Restore our tracking logic so delta-V calculations don't glitch on the first frame
-            ref Ball ball = ref CollectionsMarshal.AsSpan(_balls)[i];
-            ball.Position = snap.Position;
-            ball.Orientation = snap.Orientation;
-            ball.LinearVelocity = snap.LinearVelocity;
-            ball.AngularVelocity = snap.AngularVelocity;
-            ball.LastLinearVelocity = snap.LinearVelocity;
-            ball.LastSpeed = snap.LinearVelocity.Length();
-            ball.LastTrailPosition = snap.Position;
-        }
-
-        // Wipe visual trails and hit markers so they don't linger from the future!
-        ClearTrails();
-
-        // Wipe the tracker so it doesn't trigger audio on frame 1 of the load
-        _collisionTracker.Clear();
-    }
-    // ==========================================
+    public Vector3 GetBallPosition(int id) => _physicsStates[id].Position;
 
     private void CreateTable()
     {
-        var floorShape = new Box(TableWidth, 0.1f, TableLength);
-        var floorHandle = _simulation.Statics.Add(new StaticDescription(new Vector3(0, -0.05f, 0), _simulation.Shapes.Add(floorShape)));
+        // Define cushions as infinite planes for mathematical intersection
+        float halfWidth = TableWidth / 2f;
+        float halfLength = TableLength / 2f;
 
-        if (floorHandle.Value != 0) throw new Exception("Floor static handle is not 0.");
-
-        var cushionShapeX = new Box(CushionWidth, 0.1f, TableLength);
-        var cushionShapeZ = new Box(TableWidth + (CushionWidth * 2), 0.1f, CushionWidth);
-
-        _simulation.Statics.Add(new StaticDescription(new Vector3((-TableWidth / 2) - (CushionWidth / 2), 0, 0), _simulation.Shapes.Add(cushionShapeX)));
-        _simulation.Statics.Add(new StaticDescription(new Vector3((TableWidth / 2) + (CushionWidth / 2), 0, 0), _simulation.Shapes.Add(cushionShapeX)));
-        _simulation.Statics.Add(new StaticDescription(new Vector3(0, 0, (-TableLength / 2) - (CushionWidth / 2)), _simulation.Shapes.Add(cushionShapeZ)));
-        _simulation.Statics.Add(new StaticDescription(new Vector3(0, 0, (TableLength / 2) + (CushionWidth / 2)), _simulation.Shapes.Add(cushionShapeZ)));
+        _cushions[0] = new Cushion(new Vector3(1, 0, 0), halfWidth);  // Left cushion (normal points right)
+        _cushions[1] = new Cushion(new Vector3(-1, 0, 0), halfWidth); // Right cushion (normal points left)
+        _cushions[2] = new Cushion(new Vector3(0, 0, 1), halfLength); // Bottom cushion
+        _cushions[3] = new Cushion(new Vector3(0, 0, -1), halfLength);// Top cushion
     }
 
     private void CreateBalls()
     {
-        var sphere = new Sphere(GameSettings.StandardBallRadius);
-        var shape = _simulation.Shapes.Add(sphere);
-        var inertia = sphere.ComputeInertia(0.17f);
+        AddBall(new Vector3(0, BallRadius, -0.8f), BallType.Cue);
 
-        CreateBall(new Vector3(0, GameSettings.StandardBallRadius, -0.8f), shape, inertia, BallType.Cue);
-
-        float spacing = GameSettings.StandardBallRadius * 2.01f;
+        float spacing = BallRadius * 2.01f;
         int rows = 5;
-
         for (int r = 0; r < rows; r++)
         {
             for (int c = 0; c <= r; c++)
             {
-                Vector3 pos = new((c - (r * 0.5f)) * spacing, GameSettings.StandardBallRadius, 0.8f + (r * spacing * 0.866f));
-                CreateBall(pos, shape, inertia, BallType.Normal);
+                Vector3 pos = new Vector3((c - (r * 0.5f)) * spacing, BallRadius, 0.8f + (r * spacing * 0.866f));
+                AddBall(pos, BallType.Normal);
             }
         }
     }
 
-    private void CreateBall(Vector3 position, TypedIndex shape, BodyInertia inertia, BallType type)
+    private void AddBall(Vector3 position, BallType type)
     {
-        var collidable = new CollidableDescription(shape, 0.1f, ContinuousDetection.Continuous(1e-3f, 1e-3f));
-        var activity = new BodyActivityDescription(0.01f);
-        var bodyDesc = BodyDescription.CreateDynamic(new RigidPose(position), inertia, collidable, activity);
-        var bodyHandle = _simulation.Bodies.Add(bodyDesc);
+        int id = _activeBallCount++;
 
-        int id = _nextId++;
-        _ballHandles[id] = bodyHandle;
+        _physicsStates[id] = new BallState
+        {
+            Position = position,
+            LinearVelocity = Vector3.Zero,
+            AngularVelocity = Vector3.Zero,
+            State = MotionState.Stationary
+        };
 
-        _balls.Add(new Ball
+        _renderData[id] = new BallRenderData
         {
             Id = id,
             Type = type,
-            Position = position,
-            Orientation = Quaternion.Identity,
-            Trail = new TrailPoint[128],
-            TrailIndex = 0,
-            LastSpeed = 0f,
-            HitMarksWorld = new Vector3[8],
-            HitMarkIndex = 0
-        });
+            LastTrailPosition = position
+        };
     }
 
-    public Vector3 GetBallPosition(int id) => _simulation.Bodies.GetBodyReference(_ballHandles[id]).Pose.Position;
-
-    public void ApplyImpulse(int id, Vector3 impulse)
+    public void ApplyImpulse(int id, Vector3 impulse, Vector3 hitOffset)
     {
-        var body = _simulation.Bodies.GetBodyReference(_ballHandles[id]);
-        body.Velocity.Linear += impulse * body.LocalInertia.InverseMass;
-        body.Awake = true;
-        RetroAudio.PlayCueImpact(impulse.Length() * 3f, body.Pose.Position);
+        ref BallState ball = ref _physicsStates[id];
+
+        // Convert physical impulse into linear and angular velocity
+        ball.LinearVelocity += impulse / BallMass;
+
+        // Simplified inertia tensor for a solid sphere: I = 2/5 * m * r^2
+        float inertia = 0.4f * BallMass * (BallRadius * BallRadius);
+        Vector3 torque = Vector3.Cross(hitOffset, impulse);
+        ball.AngularVelocity += torque / inertia;
+
+        ball.State = MotionState.Sliding;
+
+        _audioListener?.PlayCueImpact(impulse.Length() * 3f, ball.Position);
     }
 
-    public void ApplyAngularImpulse(int id, Vector3 angularImpulse)
-    {
-        var body = _simulation.Bodies.GetBodyReference(_ballHandles[id]);
-        BepuUtilities.Symmetric3x3.TransformWithoutOverlap(angularImpulse, body.LocalInertia.InverseInertiaTensor, out var velocityChange);
-        body.Velocity.Angular += velocityChange;
-
-        const float maxSpin = 120f;
-
-        var spin = body.Velocity.Angular.Length();
-        if (spin > maxSpin)
-        {
-            body.Velocity.Angular *= maxSpin / spin;
-        }
-
-        body.Awake = true;
-    }
-
-    public bool AreAllBallsAsleep() => _simulation.Bodies.ActiveSet.Count == 0;
+    // ==========================================
+    // THE EVENT-BASED LOOP
+    // ==========================================
 
     public void Tick(float dt)
     {
-        _collisionTracker.Clear();
-        _simulation.Timestep(dt);
+        float timeRemaining = dt;
+        int safetyNet = 0;
 
-        Span<Ball> ballsSpan = CollectionsMarshal.AsSpan(_balls);
-
-        for (int i = 0; i < ballsSpan.Length; i++)
+        // 1. ANALYTICAL SOLVER
+        // Process exact events until the frame delta time is consumed
+        while (timeRemaining > EventEpsilon && safetyNet++ < 100)
         {
-            ref Ball ball = ref ballsSpan[i];
-            var body = _simulation.Bodies.GetBodyReference(_ballHandles[ball.Id]);
+            PhysicsEvent nextEvent = FindNextEvent(timeRemaining);
 
-            Vector3 currentVel = body.Velocity.Linear;
-            Vector3 lastVel = ball.LastLinearVelocity;
-
-            Vector3 deltaV = currentVel - lastVel;
-            float force = deltaV.Length();
-
-            if (force > 0.05f)
+            if (nextEvent.Type == EventType.None)
             {
-                for (int j = i + 1; j < ballsSpan.Length; j++)
+                // No events happened this frame. Fast forward all balls to the end of the frame.
+                FastForwardState(timeRemaining);
+                break;
+            }
+
+            // An event happened! Move time exactly to the moment of impact.
+            FastForwardState(nextEvent.Time);
+            timeRemaining -= nextEvent.Time;
+
+            // Resolve the event (change velocities, swap states)
+            ResolveEvent(nextEvent);
+        }
+
+        // 2. VISUAL/RENDERER UPDATES
+        // Update Quaternions, hit marks, and trails based on the final solved state
+        UpdateVisuals(dt);
+    }
+
+    private void FastForwardState(float time)
+    {
+        if (time <= 0) return;
+
+        Span<BallState> states = _physicsStates.AsSpan(0, _activeBallCount);
+
+        // TODO: In a full implementation, this uses analytical equations 
+        // to curve the position based on sliding friction.
+        // For now, it's linear constant-velocity integration.
+        for (int i = 0; i < states.Length; i++)
+        {
+            if (states[i].State != MotionState.Stationary)
+            {
+                states[i].Position += states[i].LinearVelocity * time;
+
+                // Very basic rolling friction deceleration placeholder
+                if (states[i].LinearVelocity.LengthSquared() > 0)
                 {
-                    if ((_collisionTracker.BallContactMask[i] & (1 << j)) != 0)
+                    Vector3 decel = Vector3.Normalize(states[i].LinearVelocity) * (0.8f * time);
+                    if (decel.LengthSquared() > states[i].LinearVelocity.LengthSquared())
                     {
-                        // ONLY record the hit mark if the Cue Ball (Id == 0) is involved
-                        if (ball.Id == 0 || ballsSpan[j].Id == 0)
-                        {
-                            // 1. Drop a hit mark directly under the first ball
-                            ball.HitMarksWorld[ball.HitMarkIndex] = new Vector3(ball.Position.X, -0.02f, ball.Position.Z);
-                            ball.HitMarkIndex = (ball.HitMarkIndex + 1) % ball.HitMarksWorld.Length;
-
-                            // 2. Drop a hit mark directly under the second ball
-                            ref Ball otherBall = ref ballsSpan[j];
-                            otherBall.HitMarksWorld[otherBall.HitMarkIndex] = new Vector3(otherBall.Position.X, -0.02f, otherBall.Position.Z);
-                            otherBall.HitMarkIndex = (otherBall.HitMarkIndex + 1) % otherBall.HitMarksWorld.Length;
-                        }
-
-                        Vector3 hitPos = (ball.Position + ballsSpan[j].Position) / 2f;
-
-
-                        var bodyA = _simulation.Bodies.GetBodyReference(_ballHandles[i]);
-                        var bodyB = _simulation.Bodies.GetBodyReference(_ballHandles[j]);
-
-                        Vector3 spinA = bodyA.Velocity.Angular;
-
-                        Vector3 contactNormal = Vector3.Normalize(ballsSpan[j].Position - ball.Position);
-
-                        // tangential spin component
-                        Vector3 tangentialSpin = Vector3.Cross(spinA, contactNormal);
-
-                        // transfer small portion
-                        const float spinTransfer = 0.02f;
-
-                        bodyB.Velocity.Linear += tangentialSpin * spinTransfer;
-                        bodyA.Velocity.Angular *= 0.98f;
-
-
-                        float spinMagnitude = ball.AngularVelocity.Length();
-                        RetroAudio.PlayBallImpact(force * 1.5f, hitPos, spinMagnitude);
+                        states[i].LinearVelocity = Vector3.Zero;
+                        states[i].State = MotionState.Stationary;
+                    }
+                    else
+                    {
+                        states[i].LinearVelocity -= decel;
                     }
                 }
+            }
+        }
+    }
 
-                if (_collisionTracker.CushionContacts[i])
+    // ==========================================
+    // CONTINUOUS COLLISION DETECTION (CCD)
+    // ==========================================
+
+    private PhysicsEvent FindNextEvent(float maxTime)
+    {
+        PhysicsEvent earliestEvent = new PhysicsEvent(maxTime, EventType.None, -1);
+        Span<BallState> states = _physicsStates.AsSpan(0, _activeBallCount);
+
+        // 1. Check Ball-Ball collisions
+        for (int i = 0; i < states.Length; i++)
+        {
+            if (states[i].State == MotionState.Stationary) continue;
+
+            for (int j = i + 1; j < states.Length; j++)
+            {
+                float t = CalculateBallBallImpactTime(in states[i], in states[j]);
+                // FIX: Changed from t > EventEpsilon to t >= 0 so we don't ignore overlapping balls
+                if (t >= 0 && t < earliestEvent.Time)
                 {
-                    RetroAudio.PlayRailImpact(force * 1.5f, ball.Position);
-
-                    Vector3 v = body.Velocity.Linear;
-
-                    Vector3 tangent = Vector3.Cross(Vector3.UnitY, v);
-
-                    body.Velocity.Linear += tangent * body.Velocity.Angular.Y * 0.02f;
-
-                    body.Velocity.Angular *= 0.8f;
+                    earliestEvent = new PhysicsEvent(t, EventType.BallBallCollision, i, j);
                 }
             }
 
-            ApplyTableFriction(body, dt);
+            // 2. Check Ball-Cushion collisions
+            for (int c = 0; c < 4; c++)
+            {
+                float t = CalculateBallCushionImpactTime(in states[i], in _cushions[c]);
+                // FIX: Changed from t > EventEpsilon to t >= 0
+                if (t >= 0 && t < earliestEvent.Time)
+                {
+                    earliestEvent = new PhysicsEvent(t, EventType.BallCushionCollision, i, -1, c);
+                }
+            }
 
-            ball.Position = body.Pose.Position;
-            ball.Orientation = body.Pose.Orientation;
-            ball.LinearVelocity = body.Velocity.Linear;
-            ball.AngularVelocity = body.Velocity.Angular;
-            ball.LastLinearVelocity = currentVel;
-            ball.LastSpeed = currentVel.Length();
+            // TODO: 3. Check Sliding -> Rolling transitions (Time to Grip)
+        }
 
-            float distanceTraveled = Vector3.Distance(ball.Position, ball.LastTrailPosition);
+        return earliestEvent;
+    }
 
+    private float CalculateBallBallImpactTime(in BallState a, in BallState b)
+    {
+        Vector3 deltaP = a.Position - b.Position;
+        Vector3 deltaV = a.LinearVelocity - b.LinearVelocity;
+
+        // If they are moving away from each other, no collision
+        if (Vector3.Dot(deltaP, deltaV) >= 0) return float.PositiveInfinity;
+
+        // Quadratic equation: a*t^2 + b*t + c = 0
+        float aQuad = deltaV.LengthSquared();
+        float bQuad = 2.0f * Vector3.Dot(deltaP, deltaV);
+        float cQuad = deltaP.LengthSquared() - (4.0f * BallRadius * BallRadius);
+
+        float discriminant = (bQuad * bQuad) - (4.0f * aQuad * cQuad);
+
+        if (discriminant < 0) return float.PositiveInfinity; // They miss each other
+
+        // Find the smallest positive root
+        float t = (-bQuad - MathF.Sqrt(discriminant)) / (2.0f * aQuad);
+        return t >= 0 ? t : float.PositiveInfinity;
+    }
+
+    private float CalculateBallCushionImpactTime(in BallState ball, in Cushion cushion)
+    {
+        float velocityTowardsCushion = Vector3.Dot(ball.LinearVelocity, cushion.Normal);
+
+        // If moving parallel or away from the cushion, no impact
+        if (velocityTowardsCushion >= 0) return float.PositiveInfinity;
+
+        // FIX: The correct plane distance equation. 
+        // This calculates the exact distance from the ball's center to the cushion plane
+        float distanceToPlane = Vector3.Dot(ball.Position, cushion.Normal) + cushion.DistanceFromCenter;
+
+        // Subtract the radius because the edge of the ball hits the cushion, not the center
+        float distanceRemaining = distanceToPlane - BallRadius;
+
+        // Safety check: if the ball is already touching or slightly inside due to floating point math
+        if (distanceRemaining <= 0) return 0f;
+
+        // Time = distance / closing speed
+        return distanceRemaining / -velocityTowardsCushion;
+    }
+
+    // ==========================================
+    // EVENT RESOLVERS
+    // ==========================================
+
+    private void ResolveEvent(in PhysicsEvent e)
+    {
+        ref BallState ballA = ref _physicsStates[e.BallA];
+
+        switch (e.Type)
+        {
+            case EventType.BallBallCollision:
+                ref BallState ballB = ref _physicsStates[e.BallB];
+                ResolveBallBall(e.BallA, e.BallB, ref ballA, ref ballB);
+                break;
+
+            case EventType.BallCushionCollision:
+                ResolveBallCushion(ref ballA, in _cushions[e.CushionIndex]);
+                break;
+        }
+    }
+
+    private void ResolveBallBall(int idA, int idB, ref BallState a, ref BallState b)
+    {
+        Vector3 normal = Vector3.Normalize(b.Position - a.Position);
+        Vector3 relativeVelocity = b.LinearVelocity - a.LinearVelocity;
+
+        float velocityAlongNormal = Vector3.Dot(relativeVelocity, normal);
+        if (velocityAlongNormal > 0) return; // Already separating
+
+        float restitution = 0.98f;
+        float impulseScalar = -(1 + restitution) * velocityAlongNormal;
+        impulseScalar /= (1 / BallMass) + (1 / BallMass);
+
+        Vector3 impulse = impulseScalar * normal;
+
+        a.LinearVelocity -= impulse / BallMass;
+        b.LinearVelocity += impulse / BallMass;
+
+        a.State = MotionState.Sliding;
+        b.State = MotionState.Sliding;
+
+        // Audio and hitmarks
+        Vector3 hitPos = (a.Position + b.Position) / 2f;
+        _renderData[idA].HitMarksWorld[_renderData[idA].HitMarkIndex++] = hitPos;
+        _renderData[idA].HitMarkIndex %= 8;
+
+        _audioListener?.PlayBallImpact(impulse.Length(), hitPos, a.AngularVelocity.Length());
+    }
+
+    private void ResolveBallCushion(ref BallState ball, in Cushion cushion)
+    {
+        float velocityAlongNormal = Vector3.Dot(ball.LinearVelocity, cushion.Normal);
+        if (velocityAlongNormal > 0) return;
+
+        float restitution = 0.85f;
+        Vector3 impulse = -(1 + restitution) * velocityAlongNormal * cushion.Normal;
+
+        ball.LinearVelocity += impulse;
+
+        _audioListener?.PlayRailImpact(impulse.Length(), ball.Position);
+    }
+
+    // ==========================================
+    // VISUALS & SAVING
+    // ==========================================
+
+    private void UpdateVisuals(float dt)
+    {
+        for (int i = 0; i < _activeBallCount; i++)
+        {
+            ref BallState phys = ref _physicsStates[i];
+            BallRenderData render = _renderData[i];
+
+            if (phys.State == MotionState.Stationary) continue;
+
+            // 1. Integrate visual rotation (Quaternions)
+            if (phys.AngularVelocity.LengthSquared() > 0.0001f)
+            {
+                float spinMagnitude = phys.AngularVelocity.Length();
+                Vector3 spinAxis = phys.AngularVelocity / spinMagnitude;
+                Quaternion frameRotation = Quaternion.CreateFromAxisAngle(spinAxis, spinMagnitude * dt);
+                render.Orientation = Quaternion.Normalize(frameRotation * render.Orientation);
+            }
+
+            // 2. Trail generation
+            float distanceTraveled = Vector3.Distance(phys.Position, render.LastTrailPosition);
             if (distanceTraveled > 0.02f)
             {
-                Vector3 vel = body.Velocity.Linear;
-                float speed = vel.Length();
-
-                // Protect against divide-by-zero if the ball is barely moving
-                Vector3 dir = speed > 0.001f ? vel / speed : Vector3.UnitZ;
-
-                ball.Trail[ball.TrailIndex] = new TrailPoint
+                render.Trail[render.TrailIndex] = new TrailPoint
                 {
-                    // UPDATED: Set the Y axis to -0.02f to sink it into the glass floor
-                    Position = new Vector3(ball.Position.X, -0.02f, ball.Position.Z),
-                    Spin = body.Velocity.Angular.Length(),
-                    Direction = dir
+                    Position = new Vector3(phys.Position.X, -0.02f, phys.Position.Z),
+                    Spin = phys.AngularVelocity.Length(),
+                    Direction = phys.LinearVelocity.LengthSquared() > 0 ? Vector3.Normalize(phys.LinearVelocity) : Vector3.UnitZ
                 };
 
-                ball.TrailIndex = (ball.TrailIndex + 1) % ball.Trail.Length;
-                ball.LastTrailPosition = ball.Position;
+                render.TrailIndex = (render.TrailIndex + 1) % render.Trail.Length;
+                render.LastTrailPosition = phys.Position;
             }
         }
     }
 
-    private void ApplyTableFriction(BodyReference body, float dt)
+    public TableSnapshot TakeSnapshot()
     {
-        const float radius = GameSettings.StandardBallRadius;
-
-        Vector3 v = body.Velocity.Linear;
-        Vector3 w = body.Velocity.Angular;
-
-        float linearSpeed = v.Length();
-        float spinSpeed = w.Length();
-
-        if (linearSpeed < 0.0005f && spinSpeed < 0.05f)
+        var snap = new TableSnapshot();
+        for (int i = 0; i < _activeBallCount; i++)
         {
-            body.Velocity.Linear = Vector3.Zero;
-            body.Velocity.Angular = Vector3.Zero;
-            return;
+            snap.PhysicsStates[i] = _physicsStates[i];
+            snap.Orientations[i] = _renderData[i].Orientation;
         }
-
-        Vector3 contact = new(0, -radius, 0);
-
-        // velocity at cloth contact point
-        Vector3 surfaceVelocity = v + Vector3.Cross(w, contact);
-        float surfaceSpeed = surfaceVelocity.Length();
-
-        // tuned constants
-        const float slidingFriction = 1.1f;   // sliding → rolling transition
-        const float rollingDecel = 0.8f;      // m/s² rolling resistance
-        const float spinDecel = 12f;          // rad/s² spin decay
-
-        if (surfaceSpeed > 0.01f)
-        {
-            // sliding phase
-            Vector3 dir = surfaceVelocity / surfaceSpeed;
-
-            Vector3 friction = -dir * slidingFriction;
-
-            body.Velocity.Linear += friction * dt;
-
-            // convert sliding into spin
-            Vector3 torque = Vector3.Cross(contact, friction);
-
-            body.Velocity.Angular += torque * dt;
-        }
-        else
-        {
-            // rolling resistance (constant deceleration)
-            if (linearSpeed > 0f)
-            {
-                float newSpeed = MathF.Max(0f, linearSpeed - rollingDecel * dt);
-                body.Velocity.Linear *= newSpeed / linearSpeed;
-            }
-        }
-
-        // spin decay (stronger than before)
-        spinSpeed = body.Velocity.Angular.Length();
-
-        if (spinSpeed > 0f)
-        {
-            float newSpin = MathF.Max(0f, spinSpeed - spinDecel * dt);
-            body.Velocity.Angular *= newSpin / spinSpeed;
-        }
-
-        //Vector3 desiredAngular = Vector3.Cross(Vector3.UnitY, body.Velocity.Linear) / radius;
-
-        //const float radius = GameSettings.StandardBallRadius;
-
-        Vector3 desiredSpin = Vector3.Cross(Vector3.UnitY, v) / radius;
-
-        body.Velocity.Angular =
-            Vector3.Lerp(body.Velocity.Angular, desiredSpin, 0.12f);
-
-        body.Velocity.Angular = Vector3.Lerp(
-            body.Velocity.Angular,
-            desiredSpin,
-            0.15f);
-
-        const float maxSpin = 120f;
-
-        float spin = body.Velocity.Angular.Length();
-
-        if (spin > maxSpin)
-        {
-            body.Velocity.Angular *= maxSpin / spin;
-        }
-
+        return snap;
     }
 
-    public void SetChalkMark(int id, Vector3 worldOffset)
+    public void RestoreSnapshot(TableSnapshot snap)
     {
-        Span<Ball> ballsSpan = CollectionsMarshal.AsSpan(_balls);
-        ballsSpan[id].ChalkMarkLocal = Vector3.Transform(worldOffset, Quaternion.Inverse(ballsSpan[id].Orientation));
-    }
-
-    public void ClearTrails()
-    {
-        Span<Ball> ballsSpan = CollectionsMarshal.AsSpan(_balls);
-        for (int i = 0; i < ballsSpan.Length; i++)
+        for (int i = 0; i < _activeBallCount; i++)
         {
-            ballsSpan[i].TrailIndex = 0;
-            Array.Clear(ballsSpan[i].Trail, 0, ballsSpan[i].Trail.Length);
-            ballsSpan[i].ChalkMarkLocal = null;
-
-            if (ballsSpan[i].HitMarksWorld != null)
-            {
-                Array.Clear(ballsSpan[i].HitMarksWorld, 0, ballsSpan[i].HitMarksWorld.Length);
-                ballsSpan[i].HitMarkIndex = 0;
-            }
+            _physicsStates[i] = snap.PhysicsStates[i];
+            _renderData[i].Orientation = snap.Orientations[i];
+            _renderData[i].TrailIndex = 0;
+            _renderData[i].LastTrailPosition = snap.PhysicsStates[i].Position;
+            Array.Clear(_renderData[i].Trail);
         }
-    }
-
-    public void Dispose()
-    {
-        _simulation.Dispose();
-        _pool.Clear();
     }
 }

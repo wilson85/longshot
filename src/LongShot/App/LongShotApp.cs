@@ -88,6 +88,5 @@ public sealed class LongShotApp : GameApplication
     {
         base.Dispose();
         // ImGuiManager.Shutdown(); // (If you are still using ImGui)
-        _engine?.Dispose();
     }
 }

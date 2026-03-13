@@ -1,4 +1,5 @@
-﻿using System.Numerics;
+﻿using System;
+using System.Numerics;
 using LongShot.Rendering;
 
 namespace LongShot.Engine;
@@ -25,8 +26,14 @@ public sealed class BilliardsSceneBuilder(
 
     private void AddBalls(RenderQueue queue)
     {
-        foreach (ref readonly var b in engine.ActiveBalls)
+        // Cache the physics state span for fast lookups
+        var physicsStates = engine.PhysicsStates;
+
+        foreach (var b in engine.RenderData)
         {
+            // IMPORTANT: Fetch the pure physics state using the ID
+            var phys = physicsStates[b.Id];
+
             Vector4 color = b.Type switch
             {
                 BallType.Cue => new Vector4(1f, 1f, 1f, 1f),
@@ -39,10 +46,9 @@ public sealed class BilliardsSceneBuilder(
                 Color = color,
                 Mesh = MeshType.Sphere,
                 Material = MaterialType.Ball,
-                World = b.Position == Vector3.Zero
-                    ? Matrix4x4.Identity
-                    : Matrix4x4.CreateFromQuaternion(b.Orientation) *
-                      Matrix4x4.CreateTranslation(b.Position)
+                // Combine visual orientation with physical position
+                World = Matrix4x4.CreateFromQuaternion(b.Orientation) *
+                      Matrix4x4.CreateTranslation(phys.Position)
             });
 
             if (b.ChalkMarkLocal.HasValue)
@@ -50,7 +56,7 @@ public sealed class BilliardsSceneBuilder(
                 // Scale it down, move it to the edge of the ball, then rotate/translate it with the ball
                 var markWorld = Matrix4x4.CreateScale(0.15f) * Matrix4x4.CreateTranslation(b.ChalkMarkLocal.Value) *
                                 Matrix4x4.CreateFromQuaternion(b.Orientation) *
-                                Matrix4x4.CreateTranslation(b.Position);
+                                Matrix4x4.CreateTranslation(phys.Position);
 
                 queue.Add(new RenderItem
                 {
@@ -61,7 +67,6 @@ public sealed class BilliardsSceneBuilder(
                 });
             }
 
-
             if (b.HitMarksWorld == null) continue;
             // Render the Impact Shadows!
 
@@ -71,7 +76,7 @@ public sealed class BilliardsSceneBuilder(
                 if (hit == Vector3.Zero) continue;
 
                 // Exactly the diameter of the ball
-                float shadowSize = GameSettings.StandardBallRadius * 2.0f;
+                float shadowSize = BilliardsEngine.BallRadius * 2.0f;
 
                 queue.Add(new RenderItem
                 {
@@ -86,14 +91,13 @@ public sealed class BilliardsSceneBuilder(
 
     private void AddTable(RenderQueue queue)
     {
-        // Note: You will want to adjust these dimensions to match 
-        // the hardcoded bounds in your physics BilliardsEngine!
-        float bedWidth = 1.27f;  // ~4.1 feet (Standard 9ft table width)
-        float bedLength = 2.54f; // ~8.3 feet (Standard 9ft table length)
+        // Pull dimensions straight from the physics engine to guarantee alignment
+        float bedWidth = BilliardsEngine.TableWidth;
+        float bedLength = BilliardsEngine.TableLength;
         float bedThickness = 0.1f;
 
         float railWidth = 0.15f;
-        float railHeight = (bedThickness + GameSettings.StandardBallRadius) * 1; // Needs to be taller than the bed to block balls
+        float railHeight = (bedThickness + BilliardsEngine.BallRadius) * 1; // Needs to be taller than the bed to block balls
 
         // We put the top of the bed exactly at Y = 0. 
         // This assumes your engine rests the balls at Y = ballRadius.
@@ -154,18 +158,19 @@ public sealed class BilliardsSceneBuilder(
 
     private void AddCue(RenderQueue queue)
     {
-        var cueBall = engine.ActiveBalls[0];
+        // Grab the physical cue ball
+        var cueBall = engine.PhysicsStates[0];
 
         // 1. Calculate the Left/Right/Up/Down shift for ENGLISH
         Vector3 forward = new Vector3(-MathF.Sin(camera.Yaw), 0, -MathF.Cos(camera.Yaw));
         Vector3 right = Vector3.Normalize(Vector3.Cross(Vector3.UnitY, forward));
         Vector3 up = Vector3.Cross(forward, right);
 
-        // FIX: Multiply the offset by the physical ball radius!
-        // This takes the 0.6 Max English clamp and shrinks it to the physical size of the ball.
-        float radius = GameSettings.StandardBallRadius;
+        // Takes the 0.6 Max English clamp and shrinks it to the physical size of the ball.
+        float radius = BilliardsEngine.BallRadius;
         Vector3 tipWorldOffset = (right * match.TipOffset.X * radius) + (up * match.TipOffset.Y * radius);
 
+        // Add to physical position
         Vector3 shiftedTargetPos = cueBall.Position + tipWorldOffset;
 
         // 2. Solve the final matrix using the shifted position and the PULLBACK offset
@@ -186,11 +191,12 @@ public sealed class BilliardsSceneBuilder(
 
     private void AddTrails(RenderQueue queue)
     {
-        foreach (ref readonly var b in engine.ActiveBalls)
+        // Loop through the RenderData which safely holds the Trails
+        foreach (var render in engine.RenderData)
         {
-            for (int i = 0; i < b.Trail.Length; i++)
+            for (int i = 0; i < render.Trail.Length; i++)
             {
-                var point = b.Trail[i];
+                var point = render.Trail[i];
                 if (point.Position == Vector3.Zero) continue;
 
                 float spinIntensity = Math.Clamp(point.Spin / 150f, 0f, 1f);
