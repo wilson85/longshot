@@ -1,4 +1,5 @@
-﻿using System.Numerics;
+﻿using System;
+using System.Numerics;
 using LongShot.Engine;
 
 namespace LongShot;
@@ -12,6 +13,9 @@ public sealed class MatchManager
 
     public float CueStickOffset => _cue.CueOffset;
     public Vector2 TipOffset => _cue.TipOffset;
+
+    public float CueYaw => _cue.Yaw;
+    public float CuePitch => _cue.Pitch;
 
     public MatchManager(
         CueController cue,
@@ -46,18 +50,19 @@ public sealed class MatchManager
         switch (Mode)
         {
             case GameStateMode.Aim:
-                UpdateAim(input);
+                UpdateAim(input, camera);
                 break;
 
             case GameStateMode.Power:
-                UpdatePower(input, camera, deltaTime, engine);
+                UpdatePower(input, deltaTime, engine);
                 break;
         }
     }
 
-    void UpdateAim(InputState input)
+    void UpdateAim(InputState input, Camera camera)
     {
-        _cue.UpdateAim(input);
+        // Pass camera here just to sync Yaw during normal aiming
+        _cue.UpdateAim(input, camera);
 
         if (input.Keys[(int)ConsoleKey.Spacebar])
         {
@@ -68,7 +73,7 @@ public sealed class MatchManager
         }
     }
 
-    void UpdatePower(InputState input, Camera camera, float dt, BilliardsEngine engine)
+    void UpdatePower(InputState input, float dt, BilliardsEngine engine)
     {
         var result = _cue.UpdateStroke(input, dt);
 
@@ -83,18 +88,15 @@ public sealed class MatchManager
         {
             Vector3 cueBallPos = engine.GetBallPosition(0);
 
-            // 1. Calculate the 3D tip positions for the PREVIOUS frame and CURRENT frame
-            Vector3 prevTipWorld = CalculateTipWorldPosition(camera, cueBallPos, _cue.PreviousCueOffset);
-            Vector3 currentTipWorld = CalculateTipWorldPosition(camera, cueBallPos, _cue.CueOffset);
+            // Calculate the 3D tip positions using the Cue's angles, not the camera!
+            Vector3 prevTipWorld = CalculateTipWorldPosition(cueBallPos, _cue.PreviousCueOffset);
+            Vector3 currentTipWorld = CalculateTipWorldPosition(cueBallPos, _cue.CueOffset);
 
-            // 2. Perform a mathematically perfect Line-Sphere sweep
-            // We add a tiny 5mm radius for the cue tip itself to the ball's radius
             float effectiveRadius = GameSettings.StandardBallRadius + 0.005f;
 
-            if (CheckTipImpact(prevTipWorld, currentTipWorld, cueBallPos, effectiveRadius))
+            if (CheckTipImpact(prevTipWorld, currentTipWorld, cueBallPos, effectiveRadius, out float hitT))
             {
-                var shot = _cue.BuildShot(camera);
-
+                var shot = _cue.BuildShot();
                 _cueBall.ApplyShot(shot);
 
                 Mode = GameStateMode.Simulate;
@@ -102,29 +104,28 @@ public sealed class MatchManager
         }
     }
 
-    private Vector3 CalculateTipWorldPosition(Camera camera, Vector3 cueBallPos, float stickOffset)
+    private Vector3 CalculateTipWorldPosition(Vector3 cueBallPos, float stickOffset)
     {
-        // Reconstruct the cue's coordinate system (same as your SceneBuilder!)
-        Vector3 forward = new Vector3(-MathF.Sin(camera.Yaw), 0, -MathF.Cos(camera.Yaw));
-        Vector3 right = Vector3.Normalize(Vector3.Cross(Vector3.UnitY, forward));
-        Vector3 up = Vector3.Cross(forward, right);
+        // Reconstruct the cue's coordinate system purely from the CueController
+        Vector3 flatForward = new Vector3(-MathF.Sin(_cue.Yaw), 0, -MathF.Cos(_cue.Yaw));
+        Vector3 right = Vector3.Normalize(Vector3.Cross(Vector3.UnitY, flatForward));
 
-        // Apply the English offset (TipOffset is mapped 0.0 to 1.0, scale by ball radius)
+        Matrix4x4 pitchRot = Matrix4x4.CreateFromAxisAngle(right, _cue.Pitch);
+        Vector3 actualForward = Vector3.Transform(flatForward, pitchRot);
+        Vector3 actualUp = Vector3.Cross(actualForward, right);
+
+        // Apply the English offset relative to the actual 3D orientation
         Vector3 tipWorldOffset = (right * _cue.TipOffset.X * GameSettings.StandardBallRadius) +
-                                 (up * _cue.TipOffset.Y * GameSettings.StandardBallRadius);
+                                 (actualUp * _cue.TipOffset.Y * GameSettings.StandardBallRadius);
 
         Vector3 targetPos = cueBallPos + tipWorldOffset;
 
-        // Apply the camera Pitch to the forward vector so the cue angles downward
-        Matrix4x4 pitchRot = Matrix4x4.CreateFromAxisAngle(right, camera.Pitch);
-        Vector3 actualForward = Vector3.Transform(forward, pitchRot);
-
-        // Add the stick offset (negative means pulled back, positive is follow-through)
         return targetPos + (actualForward * stickOffset);
     }
 
-    private bool CheckTipImpact(Vector3 lineStart, Vector3 lineEnd, Vector3 sphereCenter, float radius)
+    private bool CheckTipImpact(Vector3 lineStart, Vector3 lineEnd, Vector3 sphereCenter, float radius, out float hitT)
     {
+        hitT = 0f;
         Vector3 d = lineEnd - lineStart;
         Vector3 f = lineStart - sphereCenter;
 
@@ -134,15 +135,17 @@ public sealed class MatchManager
 
         float discriminant = b * b - 4 * a * c;
 
-        // No intersection
         if (discriminant < 0) return false;
 
         discriminant = MathF.Sqrt(discriminant);
-
-        // t1 is the percentage along the line segment where it enters the sphere
         float t1 = (-b - discriminant) / (2 * a);
 
-        // If t1 is between 0.0 and 1.0, the impact happened exactly between last frame and this frame!
-        return t1 >= 0f && t1 <= 1f;
+        if (t1 >= 0f && t1 <= 1f)
+        {
+            hitT = t1;
+            return true;
+        }
+
+        return false;
     }
 }

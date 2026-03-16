@@ -1,4 +1,5 @@
-﻿using System.Numerics;
+﻿using System;
+using System.Numerics;
 using System.Runtime.InteropServices;
 using Vortice.Multimedia;
 using Vortice.XAudio2;
@@ -30,6 +31,38 @@ public static class RetroAudio
         ListenerForward = Vector3.Normalize(forward);
     }
 
+    public static void PlayPocketDrop(Vector3 position, float entrySpeed)
+    {
+        // The faster the ball hits the pocket, the higher pitched and faster the sound!
+        float speedMultiplier = Math.Clamp(entrySpeed / 2.0f, 0.5f, 2.0f);
+
+        float durationSeconds = 0.4f / speedMultiplier;
+        float startFrequency = 300f * speedMultiplier;
+        float endFrequency = 1200f * speedMultiplier;
+        float volume = 0.6f;
+
+        PlayProceduralSound(durationSeconds, volume, position, (time, progress) =>
+        {
+            // Sweep the frequency UP quickly
+            float baseFreq = startFrequency + (endFrequency - startFrequency) * progress;
+
+            // Modulate with a low-frequency oscillator (LFO) to make it warble (the Waka-Waka)
+            float lfo = MathF.Sin(progress * MathF.PI * 20f * speedMultiplier) * 150f;
+            float currentFreq = baseFreq + lfo;
+
+            // Generate a Triangle wave for that authentic retro arcade chip-tune sound!
+            float period = 1f / currentFreq;
+            float wave = MathF.Abs((time % period) / period * 4f - 2f) - 1f;
+
+            // Volume envelope (quick fade in, smooth fade out)
+            float envelope = 1.0f;
+            if (progress < 0.1f) envelope = progress * 10f;
+            else if (progress > 0.8f) envelope = (1.0f - progress) * 5f;
+
+            return wave * envelope;
+        });
+    }
+
     /// <summary>
     /// Sharp, high-pitched "clack" with random variation and spin friction.
     /// </summary>
@@ -37,7 +70,6 @@ public static class RetroAudio
     {
         float power = Math.Clamp(impactPower, 0f, 10f);
 
-        // 1. RANDOM VARIATION: Prevents the "machine gun" phasing effect on break shots!
         float pitchJitter = (Random.Shared.NextSingle() * 50f) - 25f; // +/- 25Hz variance
         float freq = 600f + (power * 40f) + pitchJitter;
 

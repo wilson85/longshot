@@ -11,22 +11,23 @@ public sealed class CueController
     public Vector2 TipOffset { get; private set; }
     public float CueOffset => _power.CueStickOffset;
 
-    public void UpdateAim(InputState input)
+    // The Cue now owns its own orientation independent of the Camera
+    public float Yaw { get; private set; }
+    public float Pitch { get; private set; }
+
+    public void ForceCueOffset(float offset) => _power.ForceCueOffset(offset);
+
+    public void UpdateAim(InputState input, Camera camera)
     {
-        // ONLY move the tip offset if the player is holding E
         if (input.Keys[(int)ConsoleKey.E])
         {
-            // 1. FIXED SPEED: Lowered from 0.003f for finer control
+            // Adjust English
             float speed = 0.0005f;
             var offset = TipOffset;
 
-            // 2. FIXED INVERSION: Subtracted DeltaX to flip left/right
             offset.X -= input.MouseDeltaX * speed;
             offset.Y -= input.MouseDeltaY * speed;
 
-            // 3. FIXED CLAMPING: Use a circular clamp instead of a square clamp!
-            // This prevents the tip from going into the corners past the edge of the ball.
-            // 0.85f means the max english is 85% of the way to the edge (prevents miscueing).
             float maxRadius = 0.6f;
             if (offset.LengthSquared() > maxRadius * maxRadius)
             {
@@ -35,17 +36,33 @@ public sealed class CueController
 
             TipOffset = offset;
         }
+        else if (input.Keys[(int)ConsoleKey.B])
+        {
+            // Adjust Cue Elevation / Pitch
+            float speed = 0.005f;
+            Pitch += input.MouseDeltaY * speed;
+
+            // Clamp pitch between flat (0) and almost vertical (masse)
+            Pitch = Math.Clamp(Pitch, 0f, MathF.PI / 2.2f);
+        }
+        else
+        {
+            // Normal aiming: Sync the cue's yaw with the camera
+            Yaw = camera.Yaw;
+        }
     }
 
     public ShotResult UpdateStroke(InputState input, float dt)
         => _power.UpdateStroke(input, dt);
 
-    public Shot BuildShot(Camera camera)
+    public Shot BuildShot()
     {
-        var shot = _power.BuildShot(camera, TipOffset);
+        // Pass the cue's internal angles down to the shot builder
+        var shot = _power.BuildShot(Yaw, Pitch, TipOffset);
 
-        // Reset the spin back to dead-center after the strike!
+        // Reset the shot parameters for the next turn
         TipOffset = Vector2.Zero;
+        Pitch = 0f;
 
         return shot;
     }

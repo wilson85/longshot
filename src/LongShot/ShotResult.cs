@@ -3,6 +3,6 @@
 public enum ShotResult
 {
     None,
-    Strike,
-    Cancel
+    Cancel,
+    Fire 
 }

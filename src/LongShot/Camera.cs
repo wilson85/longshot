@@ -8,47 +8,106 @@ public class Camera
     public Vector3 Target;
     public Vector3 Up = Vector3.UnitY;
     public float Yaw = 0f;
-    public float Pitch = 0.5f;
-    public float Distance = 1.5f;
+
+    // We track the actual Pitch and Vertical Offset to smooth them over time
+    public float Pitch = GameSettings.PlayerViewPitch;
+    private float _currentVerticalOffset = GameSettings.CameraTargetVerticalOffset;
+
+    public float Distance = GameSettings.CameraDefaultDistance;
+
+    private Vector3 _lockedTargetPos;
+    private bool _isLocked = false;
 
     public void Update(InputState input, GameStateMode mode, Vector3 cueBallPos, float deltaTime)
     {
-        if (mode != GameStateMode.Simulate)
+        // 1. Calculate Target Values based on Mode
+        Vector3 baseTargetPos;
+
+        if (mode == GameStateMode.View)
         {
-            Target = (mode == GameStateMode.View) ? Vector3.Zero : cueBallPos;
+            baseTargetPos = Vector3.Zero;
+            _isLocked = false;
         }
+        else if (mode == GameStateMode.Simulate)
+        {
+            // Lock the camera target to where the cue ball WAS when we struck it
+            if (!_isLocked)
+            {
+                _lockedTargetPos = cueBallPos;
+                _isLocked = true;
+            }
+            baseTargetPos = _lockedTargetPos;
+        }
+        else // Aim or Power mode
+        {
+            baseTargetPos = cueBallPos;
+            _isLocked = false;
+        }
+
+        float targetPitch = Pitch; // Default to current
+        float targetVerticalOffset = GameSettings.CameraTargetVerticalOffset;
+
+        // FIX: Include GameStateMode.Power so the camera stays down when you go to shoot!
+        if (mode == GameStateMode.Aim || mode == GameStateMode.Power)
+        {
+            targetPitch = GameSettings.PlayerViewPitch;
+            targetVerticalOffset = GameSettings.PlayerViewVerticalOffset;
+        }
+        else if (mode == GameStateMode.Simulate)
+        {
+            // NEW: Keep the camera low to the table after the shot is fired!
+            targetVerticalOffset = GameSettings.PlayerViewVerticalOffset;
+            // Note: We don't force targetPitch here so you can look around while balls roll
+        }
+
+        // 2. Smoothly Interpolate (Lerp) values to avoid jarring jumps
+        // Lower 5.0f for slower transition, higher for faster.
+        float transitionSpeed = 5.0f;
+        float lerpFactor = 1.0f - MathF.Exp(-transitionSpeed * deltaTime);
+
+        // We only force the pitch to the 'PlayerViewPitch' if we aren't manually rotating
+        if (mode == GameStateMode.Aim || mode == GameStateMode.Power)
+        {
+            Pitch = MathHelper.Lerp(Pitch, targetPitch, lerpFactor);
+        }
+
+        _currentVerticalOffset = MathHelper.Lerp(_currentVerticalOffset, targetVerticalOffset, lerpFactor);
+        Target = baseTargetPos + new Vector3(0, _currentVerticalOffset, 0);
 
         Up = Vector3.UnitY;
 
-        // Handle Aiming (No mouse button required, Shift for fine adjust)
+        // 3. Handle Rotation (Manual overrides)
+        float baseSensitivity = GameSettings.MasterSensitivity;
+
         if (mode == GameStateMode.Aim && !input.Keys[(int)ConsoleKey.E])
         {
-            float sensitivity = input.Keys[16] 
-                ? GameSettings.MouseSensitivityAimFine 
-                : GameSettings.MouseSensitivityAim;
+            float sensitivity = input.Keys[16]
+                ? baseSensitivity * GameSettings.FineModifier
+                : baseSensitivity;
 
             Yaw -= input.MouseDeltaX * sensitivity;
-            Pitch += input.MouseDeltaY * sensitivity;
+
+            // Allow subtle pitch adjustment even in aim mode if desired
+            // Pitch += input.MouseDeltaY * sensitivity;
         }
         else if ((mode == GameStateMode.View || mode == GameStateMode.Simulate) && input.IsRightMouseDown)
         {
-            Yaw -= input.MouseDeltaX * GameSettings.MouseSensitivityView;
-            Pitch += input.MouseDeltaY * GameSettings.MouseSensitivityView;
+            float sensitivity = baseSensitivity * GameSettings.ViewModifier;
+            Yaw -= input.MouseDeltaX * sensitivity;
+            Pitch += input.MouseDeltaY * sensitivity;
         }
 
-
-
+        // 4. Handle Zoom
         if (input.MouseWheelDelta != 0)
         {
             Distance -= (input.MouseWheelDelta / 120.0f) * 0.25f;
         }
 
-        Pitch = Math.Clamp(Pitch, 0.1f, MathF.PI / 2.0f - 0.05f);
+        // 5. Constraints
+        Pitch = Math.Clamp(Pitch, GameSettings.CameraMinPitch, GameSettings.CameraMaxPitch);
+        Distance = Math.Clamp(Distance, GameSettings.CameraMinDistance, GameSettings.CameraMaxDistance);
 
-        // Allow zooming in to 20cm away from the target in ANY mode
-        float minDistance = 0.2f;
-        Distance = Math.Clamp(Distance, minDistance, 6.0f);
-
+        // 6. Calculate Final Position
         Position = Target + new Vector3(
             Distance * MathF.Cos(Pitch) * MathF.Sin(Yaw),
             Distance * MathF.Sin(Pitch),
@@ -64,5 +123,16 @@ public class Camera
     }
 
     public Matrix4x4 ViewMatrix => Matrix4x4.CreateLookAt(Position, Target, Up);
-    public Matrix4x4 ProjectionMatrix => Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, 1280f / 720f, 0.01f, 100f);
+
+    public Matrix4x4 ProjectionMatrix => Matrix4x4.CreatePerspectiveFieldOfView(
+        GameSettings.CameraFieldOfView,
+        1280f / 720f,
+        0.01f,
+        100f);
+}
+
+// Helper for Lerp if not available in your namespace
+public static class MathHelper
+{
+    public static float Lerp(float start, float end, float amount) => start + (end - start) * amount;
 }
