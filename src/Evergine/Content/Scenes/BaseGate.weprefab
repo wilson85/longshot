@@ -1,0 +1,92 @@
+!Evergine.Framework.Assets.AssetSources.Entities.PrefabModel,Evergine.Framework
+Root:
+  Name: gate
+  Tag: null
+  IsEnabled: true
+  IsStatic: false
+  Components:
+    - !Evergine.Framework.Graphics.Transform3D,Evergine.Framework
+      Id: 4a9307d5-842a-48d4-87ab-dc0dba1549e5
+      IsEnabled: true
+      LocalOrientation:
+        W: 1.0
+        X: 0.0
+        Y: 0.0
+        Z: 0.0
+      LocalPosition:
+        X: 0.0
+        Y: 0.0
+        Z: 0.0
+      LocalScale:
+        X: 1.0
+        Y: 1.0
+        Z: 1.0
+    - !Evergine.Components.Graphics3D.MeshRenderer,Evergine.Framework
+      Id: e516fa3b-ff55-40af-9227-0c8b65a28f00
+      DebugBoundingbox: true
+      IsCullingEnabled: true
+      IsEnabled: true
+      OrderBias: 0
+      RenderFlags: CastShadows
+    - !Evergine.Components.Graphics3D.MaterialComponent,Evergine.Framework
+      Id: f6375166-b3bb-4ba5-b126-755a6a07a1f8
+      AsignedTo: Default
+      IsEnabled: true
+      Material: dc0fdc0a-0293-4de8-bcd7-93424de0904c
+      UseCopy: false
+    - !Evergine.Components.Graphics3D.CapsuleMesh,Evergine.Components
+      Id: af773e1d-c3c2-4931-8231-af984933b898
+      Height: 1.0
+      IsEnabled: true
+      Radius: 0.5
+      Tessellation: 16
+  Children:
+    - !Evergine.Framework.Assets.AssetSources.Entities.EntityItemModel,Evergine.Framework
+      Name: photometricSphereAreaLight
+      Tag: null
+      IsEnabled: true
+      IsStatic: false
+      Components:
+        - !Evergine.Framework.Graphics.Transform3D,Evergine.Framework
+          Id: ccf985a4-d97d-47f5-800e-a2f8977a4b46
+          IsEnabled: true
+          LocalOrientation:
+            W: 1.0
+            X: 0.0
+            Y: 0.0
+            Z: 0.0
+          LocalPosition:
+            X: 0.0
+            Y: 0.0
+            Z: 0.0
+          LocalScale:
+            X: 1.0
+            Y: 1.0
+            Z: 1.0
+        - !Evergine.Framework.Graphics.PhotometricSphereAreaLight,Evergine.Framework
+          Id: 972a2377-e9bc-4579-a12d-64bffae2e109
+          Color:
+            A: 255
+            B: 0
+            G: 0
+            R: 255
+          ColorByTemperature: true
+          DebugMode: false
+          Intensity: 0.95492959
+          IsEnabled: true
+          IsShadowEnabled: false
+          LightRange: 20.0
+          LinearColor:
+            A: 1.0
+            B: 0.0
+            G: 0.0
+            R: 1.0
+          LuminousPower: 12.0
+          Radius: 0.25
+          ShadowBias: 0.00400000019
+          ShadowNearPlane: 0.100000001
+          ShadowOpacity: 1.0
+          Temperature: 6500.0
+      Children: []
+      Id: 8d633a4a-0f2d-4161-b45e-a33041703cde
+  Id: 30290816-6c82-4f17-8119-18157bb13d51

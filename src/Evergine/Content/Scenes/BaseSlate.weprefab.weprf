@@ -1,0 +1,16 @@
+!Evergine.Assets.Exporters.Prefab.PrefabMetaFile,Evergine.Assets
+Id: 16cd1be7-a92f-44a8-831a-b5bf7aca75e9
+DefaultProfile:
+  ExcludeAsset: false
+  Name: null
+  Platform: Undefined
+ExportAsRaw: false
+PrefabData: null
+Profiles: {}
+Source:
+  Header:
+    Id: 371d1f9e-9bd1-4fa7-98bf-761ceb9b511b
+    IsCompressed: true
+  LastModified: 0001-01-01T00:00:00.0000000
+  PrefabData:
+    Id: c7e0f652-63f2-4889-8e95-b430ac8fe9e5

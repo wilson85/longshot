@@ -1,0 +1,45 @@
+!Evergine.Framework.Assets.AssetSources.Entities.PrefabModel,Evergine.Framework
+Root:
+  Name: ball
+  Tag: null
+  IsEnabled: true
+  IsStatic: false
+  Components:
+    - !Evergine.Framework.Graphics.Transform3D,Evergine.Framework
+      Id: c344ae16-4ad7-4f1b-bc07-2507be062c4f
+      IsEnabled: true
+      LocalOrientation:
+        W: 1.0
+        X: 0.0
+        Y: 0.0
+        Z: 0.0
+      LocalPosition:
+        X: 0.0
+        Y: 0.0
+        Z: 0.0
+      LocalScale:
+        X: 1.0
+        Y: 1.0
+        Z: 1.0
+    - !Evergine.Components.Graphics3D.SphereMesh,Evergine.Components
+      Id: 0e05db8b-39ab-4e7f-9f6f-539fa41cb361
+      Diameter: 0.0571499988
+      IsEnabled: true
+      Tessellation: 16
+      UMirror: false
+      VMirror: false
+    - !Evergine.Components.Graphics3D.MeshRenderer,Evergine.Framework
+      Id: 201c2245-fb25-458d-ae8c-fa95b804bb14
+      DebugBoundingbox: true
+      IsCullingEnabled: true
+      IsEnabled: true
+      OrderBias: 0
+      RenderFlags: CastShadows
+    - !Evergine.Components.Graphics3D.MaterialComponent,Evergine.Framework
+      Id: 59682a4c-d900-4458-814a-aa971ca73a26
+      AsignedTo: Default
+      IsEnabled: true
+      Material: cc67a65a-35b7-4172-b3e2-69eeab140f80
+      UseCopy: false
+  Children: []
+  Id: 2ef8c79a-f1ca-48b4-a9d5-f49590810cf6

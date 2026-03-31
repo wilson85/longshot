@@ -1,0 +1,43 @@
+!Evergine.Framework.Assets.AssetSources.Entities.PrefabModel,Evergine.Framework
+Root:
+  Name: Cue
+  Tag: null
+  IsEnabled: true
+  IsStatic: false
+  Components:
+    - !Evergine.Framework.Graphics.Transform3D,Evergine.Framework
+      Id: 18ee5b94-7d24-4493-83a7-a7d84741d3ba
+      IsEnabled: true
+      LocalOrientation:
+        W: 1.0
+        X: 0.0
+        Y: 0.0
+        Z: 0.0
+      LocalPosition:
+        X: 0.0
+        Y: 0.0
+        Z: 0.0
+      LocalScale:
+        X: 1.0
+        Y: 1.0
+        Z: 1.0
+    - !Evergine.Components.Graphics3D.MeshComponent,Evergine.Framework
+      Id: c384f07e-13da-4b29-b922-e8193a599095
+      IsEnabled: true
+      Model: null
+      ModelMeshName: null
+    - !Evergine.Components.Graphics3D.MeshRenderer,Evergine.Framework
+      Id: 35ad59f8-4b28-4e16-ac7d-84b84e71ce57
+      DebugBoundingbox: true
+      IsCullingEnabled: true
+      IsEnabled: true
+      OrderBias: 0
+      RenderFlags: CastShadows
+    - !Evergine.Components.Graphics3D.MaterialComponent,Evergine.Framework
+      Id: 59de9d31-bef4-4542-b623-7480ae2f4868
+      AsignedTo: Default
+      IsEnabled: true
+      Material: null
+      UseCopy: false
+  Children: []
+  Id: 654fce87-2350-4439-8eac-95beaa70f0c0

@@ -1,0 +1,36 @@
+!Evergine.Assets.Exporters.MaterialMetaFile,Evergine.Assets
+Id: 2a8c15eb-08e9-4a99-a8b3-3ddc4c1d3817
+DefaultProfile:
+  ExcludeAsset: false
+  Name: null
+  Platform: Undefined
+ExportAsRaw: false
+MaterialInfo:
+  Id: 0d0b3f0e-ee88-4fa0-b0e2-c454c2a484ce
+  ActiveDirectives: []
+  AllowInstancing: false
+  EffectID: a53d0b80-0382-4e7f-a5bc-bdbeb9ebd6a8
+  Layer: e35c59a9-26ab-4b4c-8210-4b1f21c31530
+  OrderBias: 0
+  Parameters:
+    - Name: FresnelPower
+      Type: System.Single
+      ValueByteArray: AACAQA==
+    - Name: BaseOpacity
+      Type: System.Single
+      ValueByteArray: AAAAPw==
+    - Name: EmissiveIntensity
+      Type: System.Single
+      ValueByteArray: AAAgQQ==
+    - Name: WorldViewProj
+      Type: Evergine.Mathematics.Matrix4x4,Evergine.Mathematics
+      ValueByteArray: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==
+    - Name: World
+      Type: Evergine.Mathematics.Matrix4x4,Evergine.Mathematics
+      ValueByteArray: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==
+    - Name: CameraPosition
+      Type: Evergine.Mathematics.Vector3,Evergine.Mathematics
+      ValueByteArray: AAAAAAAAAAAAAAAA
+  Samplers: null
+  Textures: null
+Profiles: {}

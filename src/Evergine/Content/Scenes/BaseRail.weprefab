@@ -1,0 +1,43 @@
+!Evergine.Framework.Assets.AssetSources.Entities.PrefabModel,Evergine.Framework
+Root:
+  Name: BaseRail
+  Tag: null
+  IsEnabled: true
+  IsStatic: false
+  Components:
+    - !Evergine.Framework.Graphics.Transform3D,Evergine.Framework
+      Id: bf3b2756-f983-4851-986f-266f1a3c9fbf
+      IsEnabled: true
+      LocalOrientation:
+        W: 1.0
+        X: 0.0
+        Y: 0.0
+        Z: 0.0
+      LocalPosition:
+        X: 0.0
+        Y: 0.0
+        Z: 0.0
+      LocalScale:
+        X: 1.0
+        Y: 1.0
+        Z: 1.0
+    - !Evergine.Components.Graphics3D.MeshComponent,Evergine.Framework
+      Id: 7f183038-2bce-476f-a92e-a4f562d9bc83
+      IsEnabled: true
+      Model: null
+      ModelMeshName: null
+    - !Evergine.Components.Graphics3D.MeshRenderer,Evergine.Framework
+      Id: 0f3dd5c0-0a04-43fd-82cf-e2fe718e4a64
+      DebugBoundingbox: true
+      IsCullingEnabled: true
+      IsEnabled: true
+      OrderBias: 0
+      RenderFlags: CastShadows
+    - !Evergine.Components.Graphics3D.MaterialComponent,Evergine.Framework
+      Id: 97d92a98-ff9e-4166-8c87-ebc92bac2cd2
+      AsignedTo: Default
+      IsEnabled: true
+      Material: f9be5821-e316-4cae-b212-0d87ad516d26
+      UseCopy: false
+  Children: []
+  Id: ef381459-606f-4fef-92bc-cd95ee0fd5d0

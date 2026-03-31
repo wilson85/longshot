@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<TargetFramework>net80</TargetFramework>
+		<GenerateEvergineContent>True</GenerateEvergineContent>
+		<GenerateEvergineAssets>False</GenerateEvergineAssets>
+		<GenerateEvergineScenesCode>True</GenerateEvergineScenesCode>
+		<RootNamespace>Longshot</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<PackageReference Include="Evergine.Common" Version="2025.10.21.3204" />
+		<PackageReference Include="Evergine.Components" Version="2025.10.21.3204" />
+		<PackageReference Include="Evergine.Framework" Version="2025.10.21.3204" />
+		<PackageReference Include="Evergine.Mathematics" Version="2025.10.21.3204" />
+		<PackageReference Include="Evergine.Targets" Version="2025.10.21.3204" />
+		<PackageReference Include="Evergine.CodeScenes" Version="2025.10.21.3204" />
+		<PackageReference Include="Evergine.Yaml" Version="2025.6.12.2" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.5" />
+	</ItemGroup>
+	<ItemGroup>
+	  <Folder Include="Input\" />
+	</ItemGroup>
+</Project>

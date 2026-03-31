@@ -1,6 +1,6 @@
-﻿using System.Numerics;
-using LongShot.Rendering;
-using LongShot.Table;
+﻿using System;
+using System.Numerics;
+using Longshot.Engine;
 
 namespace LongShot.Engine;
 
@@ -12,36 +12,33 @@ public sealed class BilliardsEngine
 {
     public PhysicsConfig Config = PhysicsConfig.Default;
 
-    private readonly BallState[] _physicsStates = new BallState[BilliardsConstants.MaxBalls];
-    private readonly BallRenderData[] _renderData = new BallRenderData[BilliardsConstants.MaxBalls];
+    private readonly BallState[] _physicsStates = new BallState[GameSettings.MaxBalls];
+    private readonly BallRenderData[] _renderData = new BallRenderData[GameSettings.MaxBalls];
 
     public ReadOnlySpan<BallState> PhysicsStates => _physicsStates.AsSpan(0, ActiveBallCount);
     public ReadOnlySpan<BallRenderData> RenderData => _renderData.AsSpan(0, ActiveBallCount);
     public TableLayout TableLayout { get; } = new TableLayout();
     public int ActiveBallCount { get; private set; }
 
-    public event Action<int, Vector3>? OnBallPocketed;
+    public event Action<int, Vector3> OnBallPocketed;
 
-    public BilliardsEngine()
+    public void InitializeMatch(CushionSegment[] rails, PocketBeam[] pockets)
     {
-        CreateTable();
+        TableLayout.LoadProceduralData(rails, pockets);
         CreateBalls();
     }
-
-    private void CreateTable() =>
-        TableLayout.BuildBallTronTable(BilliardsConstants.TableWidth, BilliardsConstants.TableLength);
 
     private void CreateBalls()
     {
         AddBall(new Vector3(0, Config.Ball.Radius, -0.8f), BallType.Cue);
 
-        float spacing = Config.Ball.Radius * 2.001f; // Tighter rack
+        float spacing = Config.Ball.Radius * 2.001f; 
         for (int r = 0; r < 5; r++)
         {
             for (int c = 0; c <= r; c++)
             {
-                float jitterX = (float)(Random.Shared.NextDouble() - 0.5) * 0.0001f;
-                float jitterZ = (float)(Random.Shared.NextDouble() - 0.5) * 0.0001f;
+                float jitterX = (float)(System.Random.Shared.NextDouble() - 0.5) * 0.0001f;
+                float jitterZ = (float)(System.Random.Shared.NextDouble() - 0.5) * 0.0001f;
 
                 Vector3 pos = new Vector3(
                     ((c - (r * 0.5f)) * spacing) + jitterX,
@@ -93,15 +90,12 @@ public sealed class BilliardsEngine
             finalImpulse += squirtDirection * squirtMagnitude;
         }
 
-        // --- THE FIX: Dampen the torque lever arm ---
-        // We calculate squirt using the real offset, but we scale the offset down 
-        // right before applying the impulse to simulate the leather tip slipping!
         Vector3 torqueOffset = safeOffset * Config.Cue.SpinEfficiency;
 
         PhysicsMath.ApplyImpulse(ref ball, finalImpulse, torqueOffset, Config.Ball.Mass, Config.Ball.Radius);
 
         ball.State = MotionState.Sliding;
-        RetroAudio.PlayCueImpact(force * 3f, ball.Position);
+        //RetroAudio.PlayCueImpact(force * 3f, ball.Position);
     }
 
     public void Tick(float dt)
@@ -109,9 +103,9 @@ public sealed class BilliardsEngine
         float timeRemaining = dt;
         int safetyNet = 0;
 
-        while (timeRemaining > BilliardsConstants.EventEpsilon && safetyNet++ < 200)
+        while (timeRemaining > GameSettings.EventEpsilon && safetyNet++ < 200)
         {
-            float step = MathF.Min(timeRemaining, BilliardsConstants.MaxPhysicsStep);
+            float step = MathF.Min(timeRemaining, GameSettings.MaxPhysicsStep);
 
             PhysicsEvent nextEvent = FindNextEvent(step);
             float advanceTime = nextEvent.Type == EventType.None ? step : nextEvent.Time;
@@ -163,7 +157,9 @@ public sealed class BilliardsEngine
             for (int j = i + 1; j < states.Length; j++)
             {
                 if (states[i].State == MotionState.Stationary && states[j].State == MotionState.Stationary)
+                {
                     continue;
+                }
 
                 float t = CollisionDetection.CalculateBallBallImpactTime(in states[i], in states[j]);
                 if (t >= 0 && t < earliest.Time)
@@ -172,7 +168,10 @@ public sealed class BilliardsEngine
                 }
             }
 
-            if (states[i].State == MotionState.Stationary) continue;
+            if (states[i].State == MotionState.Stationary)
+            {
+                continue;
+            }
 
             for (int r = 0; r < TableLayout.Rails.Length; r++)
             {
@@ -194,7 +193,7 @@ public sealed class BilliardsEngine
 
             for (int p = 0; p < TableLayout.Pockets.Length; p++)
             {
-                float t = CollisionDetection.CalculatePocketCrossTime(in states[i], in TableLayout.Pockets[p]);
+                float t = CollisionDetection.CalculatePocketCrossTime(in states[i], in TableLayout.Pockets[p], GameSettings.BallRadius);
                 if (t >= 0 && t < earliest.Time)
                 {
                     earliest = new PhysicsEvent(t, EventType.BallPocketed, i, -1, p);
@@ -242,7 +241,7 @@ public sealed class BilliardsEngine
             ball.Position = new Vector3(999f, -999f, 999f);
         }
 
-        RetroAudio.PlayPocketDrop(dropPos, speed);
+        //RetroAudio.PlayPocketDrop(dropPos, speed);
         OnBallPocketed?.Invoke(id, dropPos);
     }
 
@@ -254,7 +253,10 @@ public sealed class BilliardsEngine
     {
         for (int i = 0; i < ActiveBallCount; i++)
         {
-            if (_physicsStates[i].State != MotionState.Stationary) return false;
+            if (_physicsStates[i].State != MotionState.Stationary)
+            {
+                return false;
+            }
         }
         return true;
     }

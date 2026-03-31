@@ -1,0 +1,54 @@
+!Evergine.Framework.Assets.AssetSources.Entities.PrefabModel,Evergine.Framework
+Root:
+  Name: Slate
+  Tag: null
+  IsEnabled: true
+  IsStatic: false
+  Components:
+    - !Evergine.Framework.Graphics.Transform3D,Evergine.Framework
+      Id: 0187a2be-878d-4966-af99-f7a4f11a371d
+      IsEnabled: true
+      LocalOrientation:
+        W: 1.0
+        X: 0.0
+        Y: 0.0
+        Z: 0.0
+      LocalPosition:
+        X: 0.0
+        Y: 0.0
+        Z: 0.0
+      LocalScale:
+        X: 0.0
+        Y: 0.0
+        Z: 0.0
+    - !Evergine.Components.Graphics3D.MaterialComponent,Evergine.Framework
+      Id: ea0f0e48-b8b3-4000-9cbd-61bf7c8a79a3
+      AsignedTo: Default
+      IsEnabled: true
+      Material: 4d94fcfe-ceeb-4978-9f12-36cb6e89ae69
+      UseCopy: false
+    - !Evergine.Components.Graphics3D.MeshRenderer,Evergine.Framework
+      Id: 9fb048b6-e250-475a-ba62-937c54504fcc
+      DebugBoundingbox: true
+      IsCullingEnabled: true
+      IsEnabled: true
+      OrderBias: 0
+      RenderFlags: CastShadows
+    - !Evergine.Components.Graphics3D.PlaneMesh,Evergine.Components
+      Id: 55783437-3348-42dc-b22b-e3598908d819
+      Height: 1.0
+      IsEnabled: true
+      Origin:
+        X: 0.5
+        Y: 0.5
+      PlaneNormal: YPositive
+      TwoSides: false
+      UMirror: false
+      UOffset: 0.0
+      UTile: 1.0
+      VMirror: false
+      VOffset: 0.0
+      VTile: 1.0
+      Width: 1.0
+  Children: []
+  Id: 6e48915d-61cf-4cb0-9cfd-b4b44d4803bf
