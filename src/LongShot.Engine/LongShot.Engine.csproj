@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>LongShot.Engine</RootNamespace>
+    <AssemblyName>LongShot.Engine</AssemblyName>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Description>Headless billiards simulation core. Pure System.Numerics, zero external engine dependencies. Portable target for Evergine, s&amp;box, console, tests.</Description>
+  </PropertyGroup>
+</Project>

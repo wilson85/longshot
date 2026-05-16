@@ -1,20 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using Evergine.Common.Attributes;
-using Evergine.Common.Input.Keyboard;
-using Evergine.Common.Input.Mouse;
-using Evergine.Framework;
-using Evergine.Framework.Graphics;
-using Evergine.Framework.Managers;
-using Evergine.Framework.Prefabs;
-using Evergine.Framework.Services;
-using Evergine.Mathematics;
-using Longshot.Engine;
-using Longshot.Gameplay.Cue;
-using Longshot.Gameplay.Table;
-using Longshot.Utils;
-using Longshot.Visuals;
-using LongShot.Engine;
+﻿using Evergine.Mathematics;
 
 namespace Longshot.Gameplay.Match;
 
@@ -29,6 +13,9 @@ public class MatchSceneManager : UpdatableSceneManager
     public BilliardsEngine Engine { get; private set; }
 
     [IgnoreEvergine]
+    public TableDefinition CurrentTableData { get; private set; }
+
+    [IgnoreEvergine]
     private CueControllerBehavior _cueController;
 
     [IgnoreEvergine]
@@ -40,12 +27,67 @@ public class MatchSceneManager : UpdatableSceneManager
     {
         base.Start();
 
+        // 1. Initialize the Engine and Pure Data
         Engine = new BilliardsEngine();
+        Engine.OnBallPocketed += HandleBallPocketed;
+        CurrentTableData = TableDefinition.BuildWpaStandard();
 
+        // 2. Instruct the visual director to paint the scene based on the pure data
+        var tableDirector = this.Managers.EntityManager.FindFirstComponentOfType<TronTableDirector>();
+        if (tableDirector != null)
+        {
+            tableDirector.BuildVisualTable(CurrentTableData);
+        }
+
+        // 3. Setup Physics and Interactions
         _cueController = EnsureCueControllerBehavior();
-        LoadTableCollisions();
+        LoadTableCollisions(CurrentTableData);
         SpawnVisualBalls();
         SyncVisuals();
+    }
+
+    private void HandleBallPocketed(int id, System.Numerics.Vector3 dropPos)
+    {
+        // Cue ball scratch: drop it back on the head spot. Future game rules (ball-in-hand,
+        // 8-ball respotting, foul accounting) belong here, not in the engine.
+        if (id == 0)
+        {
+            Engine.RespawnBall(0, new System.Numerics.Vector3(0, Engine.Config.Ball.Radius, -0.8f));
+        }
+    }
+
+    private void LoadTableCollisions(TableDefinition tableData)
+    {
+        var (rails, pockets) = TableBuilder.Build(tableData);
+        Engine.InitializeMatch(rails, pockets);
+        BuildStandardRack(Engine);
+    }
+
+    /// <summary>
+    /// 8-ball triangle rack at the foot spot, cue ball at the head. Pure gameplay setup -
+    /// the engine itself doesn't know what a rack is.
+    /// </summary>
+    private static void BuildStandardRack(BilliardsEngine engine)
+    {
+        float r = engine.Config.Ball.Radius;
+        engine.AddBall(new System.Numerics.Vector3(0, r, -0.8f), BallType.Cue);
+
+        float spacing = r * 2.001f;
+        for (int row = 0; row < 5; row++)
+        {
+            for (int col = 0; col <= row; col++)
+            {
+                float jitterX = (float)(System.Random.Shared.NextDouble() - 0.5) * 0.0001f;
+                float jitterZ = (float)(System.Random.Shared.NextDouble() - 0.5) * 0.0001f;
+
+                var pos = new System.Numerics.Vector3(
+                    ((col - (row * 0.5f)) * spacing) + jitterX,
+                    r,
+                    0.8f + (row * spacing * 0.866f) + jitterZ);
+
+                engine.AddBall(pos, BallType.Normal);
+            }
+        }
     }
 
     public void SyncVisuals()
@@ -255,66 +297,5 @@ public class MatchSceneManager : UpdatableSceneManager
         float finalPower = rawImpactVelocity * massCoefficient;
 
         return Math.Clamp(finalPower, 0.0f, GameSettings.MaxImpactSpeed);
-    }
-
-    private void LoadTableCollisions()
-    {
-        var tableSegments = new List<CushionSegment>();
-
-        // Find every procedural rail currently in the scene
-        var rails = this.Managers.EntityManager.FindComponentsOfType<ProceduralRail>();
-
-        foreach (var rail in rails)
-        {
-            if (rail.LocalCollisionSegments == null)
-            {
-                continue;
-            }
-
-            var transform = rail.Owner.FindComponent<Transform3D>();
-
-            var matrix = System.Numerics.Matrix4x4.CreateRotationY(-transform.LocalRotation.Y) * System.Numerics.Matrix4x4.CreateTranslation(transform.LocalPosition.X, 0, transform.LocalPosition.Z);
-
-            foreach (var localSeg in rail.LocalCollisionSegments)
-            {
-                var localStart3D = new System.Numerics.Vector3(localSeg.Start.X, 0, localSeg.Start.Y);
-                var localEnd3D = new System.Numerics.Vector3(localSeg.End.X, 0, localSeg.End.Y);
-                var localNormal3D = new System.Numerics.Vector3(localSeg.Normal.X, 0, localSeg.Normal.Y);
-
-                var tableStart = System.Numerics.Vector3.Transform(localStart3D, matrix);
-                var tableEnd = System.Numerics.Vector3.Transform(localEnd3D, matrix);
-                var tableNormal = System.Numerics.Vector3.TransformNormal(localNormal3D, matrix);
-
-                tableSegments.Add(new CushionSegment(tableStart, tableEnd, tableNormal));
-            }
-        }
-
-        var pocketBeams = new List<PocketBeam>();
-
-        var gates = this.Managers.EntityManager.FindComponentsOfType<LaserPocketGate>();
-
-        foreach (var gate in gates)
-        {
-            var transform = gate.Owner.FindComponent<Transform3D>();
-
-            // We get the world properties directly from Evergine!
-            var center = transform.Position.ToNumerics();
-            var forward = transform.WorldTransform.Forward.ToNumerics(); // This is the Z axis (Length)
-            var right = transform.WorldTransform.Right.ToNumerics();     // This is the X axis (Pull Direction)
-
-            float halfLen = gate.Length / 2f;
-
-            // Apply the depth offset along the local X axis
-            var offsetCenter = center + right;
-
-            // Reconstruct the P1 and P2 points in 3D Table Space
-            var p1 = offsetCenter - (forward * halfLen);
-            var p2 = offsetCenter + (forward * halfLen);
-
-            // We pass the local right vector as the PullDirection
-            pocketBeams.Add(new PocketBeam(p1, p2, right, GameSettings.BallRadius*2f));
-        }
-
-        Engine.InitializeMatch(tableSegments.ToArray(), pocketBeams.ToArray());
     }
 }

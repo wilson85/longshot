@@ -6,36 +6,36 @@ DefaultProfile:
   Platform: Undefined
 ExportAsRaw: false
 MaterialInfo:
-  Id: 2f06166f-1ecc-4f96-898d-025ca76f7d6a
+  Id: 7cfead19-3887-442d-b8a8-81b7231c408a
   ActiveDirectives:
     - IBL
     - LIT
   AllowInstancing: false
   EffectID: daa1f60a-82ad-40fc-8fbb-7b85caa6de0a
-  Layer: e35c59a9-26ab-4b4c-8210-4b1f21c31530
+  Layer: 0db59561-b3f5-444f-b5de-e62e3a5b42bf
   OrderBias: 0
   Parameters:
     - Name: World
       Type: Evergine.Mathematics.Matrix4x4,Evergine.Mathematics
-      ValueByteArray: AAAAQAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAACAPw==
+      ValueByteArray: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==
     - Name: PreWorld
       Type: Evergine.Mathematics.Matrix4x4,Evergine.Mathematics
       ValueByteArray: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==
     - Name: ForwardLightMask
       Type: Evergine.Mathematics.UInt2,Evergine.Mathematics
-      ValueByteArray: AwAAAAAAAAA=
+      ValueByteArray: AAAAAAAAAAA=
     - Name: ViewProj
       Type: Evergine.Mathematics.Matrix4x4,Evergine.Mathematics
-      ValueByteArray: yql+v3pd8j4ox2I/WsFiPwAAAACT2xZAXFddvrFRXb5ISwlAScdgPoNS0j4hTdI+jAaZtBGMJDUf7ItAvRuPQA==
+      ValueByteArray: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==
     - Name: PreViewProj
       Type: Evergine.Mathematics.Matrix4x4,Evergine.Mathematics
       ValueByteArray: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==
     - Name: EyePosition
       Type: Evergine.Mathematics.Vector3,Evergine.Mathematics
-      ValueByteArray: J4V9wDRxdz++H+u/
+      ValueByteArray: AAAAAAAAAAAAAAAA
     - Name: EyeCount
       Type: System.Int32
-      ValueByteArray: AQAAAA==
+      ValueByteArray: AAAAAA==
     - Name: Jitter
       Type: Evergine.Mathematics.Vector2,Evergine.Mathematics
       ValueByteArray: AAAAAAAAAAA=
@@ -44,16 +44,16 @@ MaterialInfo:
       ValueByteArray: AAAAAAAAAAA=
     - Name: EV100
       Type: System.Single
-      ValueByteArray: c6yGvg==
+      ValueByteArray: AAAAAA==
     - Name: Exposure
       Type: System.Single
-      ValueByteArray: AACAPw==
+      ValueByteArray: AAAAAA==
     - Name: IblMaxMipLevel
       Type: System.UInt32
       ValueByteArray: AAAAAA==
     - Name: IblLuminance
       Type: System.Single
-      ValueByteArray: AACAPw==
+      ValueByteArray: AAAAAA==
     - Name: MultiviewViewProj
       Type: Evergine.Mathematics.Matrix4x4,Evergine.Mathematics
       ValueByteArray: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==
@@ -65,19 +65,19 @@ MaterialInfo:
       ValueByteArray: AAAAAA==
     - Name: BaseColor
       Type: Evergine.Mathematics.Vector3,Evergine.Mathematics
-      ValueByteArray: AACAPwAAAAAwfMA5
+      ValueByteArray: AAAAAAAAAAAAAAAA
     - Name: Alpha
       Type: System.Single
-      ValueByteArray: AAAAPw==
+      ValueByteArray: AACAPw==
     - Name: Metallic
       Type: System.Single
       ValueByteArray: AAAAAA==
     - Name: Roughness
       Type: System.Single
-      ValueByteArray: AACAPw==
+      ValueByteArray: mplZPw==
     - Name: Reflectance
       Type: System.Single
-      ValueByteArray: CtcjPA==
+      ValueByteArray: zczMPQ==
     - Name: ReferenceAlpha
       Type: System.Single
       ValueByteArray: AAAAAA==
@@ -98,16 +98,16 @@ MaterialInfo:
       ValueByteArray: AACAPwAAgD8=
     - Name: Emissive
       Type: Evergine.Mathematics.Vector3,Evergine.Mathematics
-      ValueByteArray: AACAPwAAAAAAAAAA
+      ValueByteArray: AACAPyxKNjwsSjY8
     - Name: EmissiveIntensity
       Type: System.Single
-      ValueByteArray: AADwQQ==
+      ValueByteArray: AAAgQQ==
     - Name: TextureRotation
       Type: System.Single
       ValueByteArray: AAAAAA==
     - Name: IrradianceSH
       Type: Evergine.Mathematics.Vector4,Evergine.Mathematics
-      ValueByteArray: QAAAACUAAABaAAADAGAQAA==
+      ValueByteArray: AAAAAAAAAAAAAAAAAAAAAA==
     - Name: ShadowViewProjectionArray
       Type: Evergine.Mathematics.Matrix4x4,Evergine.Mathematics
       ValueByteArray: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==

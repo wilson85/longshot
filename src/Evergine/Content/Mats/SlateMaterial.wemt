@@ -6,13 +6,13 @@ DefaultProfile:
   Platform: Undefined
 ExportAsRaw: false
 MaterialInfo:
-  Id: b957505f-18eb-4e28-ba5f-10616b907f63
+  Id: 11adcae5-c415-4dce-8e5a-60710fc8cd9a
   ActiveDirectives:
     - IBL
     - LIT
   AllowInstancing: false
   EffectID: daa1f60a-82ad-40fc-8fbb-7b85caa6de0a
-  Layer: e35c59a9-26ab-4b4c-8210-4b1f21c31530
+  Layer: 0db59561-b3f5-444f-b5de-e62e3a5b42bf
   OrderBias: 0
   Parameters:
     - Name: World
@@ -68,16 +68,16 @@ MaterialInfo:
       ValueByteArray: hr9cPJAdyj1yGhE/
     - Name: Alpha
       Type: System.Single
-      ValueByteArray: mplZPw==
+      ValueByteArray: AACAPw==
     - Name: Metallic
       Type: System.Single
       ValueByteArray: AAAAAA==
     - Name: Roughness
       Type: System.Single
-      ValueByteArray: AACAPg==
+      ValueByteArray: ZmbmPg==
     - Name: Reflectance
       Type: System.Single
-      ValueByteArray: zczMPA==
+      ValueByteArray: CtejOw==
     - Name: ReferenceAlpha
       Type: System.Single
       ValueByteArray: AAAAAA==
@@ -101,7 +101,7 @@ MaterialInfo:
       ValueByteArray: AACAPwAAgD8AAIA/
     - Name: EmissiveIntensity
       Type: System.Single
-      ValueByteArray: AABAQA==
+      ValueByteArray: AACAPw==
     - Name: TextureRotation
       Type: System.Single
       ValueByteArray: AAAAAA==

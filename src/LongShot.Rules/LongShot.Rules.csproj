@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>LongShot.Rules</RootNamespace>
+    <AssemblyName>LongShot.Rules</AssemblyName>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Description>Concrete IShotObserver implementations: scoring, fouls, power-ups, achievements. Anything above the engine that interprets ShotSummary.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LongShot.Shot\LongShot.Shot.csproj" />
+  </ItemGroup>
+</Project>

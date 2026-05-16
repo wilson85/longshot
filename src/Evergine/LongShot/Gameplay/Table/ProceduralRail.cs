@@ -10,7 +10,7 @@ namespace Longshot.Gameplay.Table;
 public class TableParameters
 {
     public float BallDiameter = 0.05715f; // Standard WPA pool ball (57.15mm)
-    public float IslandWidth = 0.09f;
+    public float RailWidth = 0.09f;
 }
 
 public class ProceduralRail : Component
@@ -49,8 +49,6 @@ public class ProceduralRail : Component
         RebuildRail();
     }
 
-    public IReadOnlyList<LineSegment> LocalCollisionSegments { get; private set; }
-
     public void RebuildRail()
     {
         var verts = new List<TronVertex>();
@@ -60,7 +58,7 @@ public class ProceduralRail : Component
             Parameters,
             Start,
             End,
-            Parameters.IslandWidth,
+            Parameters.RailWidth,
             StartJaw,
             EndJaw,
             CornerResolution,
@@ -69,8 +67,7 @@ public class ProceduralRail : Component
             RailColor,
             verts,
             indices,
-            out var localPhysics,
-            out var tips,
+            out _,
             out var pos,
             out var rot);
 
@@ -80,8 +77,6 @@ public class ProceduralRail : Component
             tr.LocalPosition = pos.ToEvergine();
             tr.LocalRotation = rot.ToEvergine();
         }
-
-        LocalCollisionSegments = localPhysics;
 
         UpdateEvergineMesh(verts.ToArray(), indices.ToArray());
 

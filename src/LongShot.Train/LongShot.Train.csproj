@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>LongShot.Train</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- TorchSharp managed API + libtorch CPU runtime. Swap the runtime package for -->
+    <!-- TorchSharp-cuda-12.1 if you have an NVIDIA GPU and matching CUDA toolkit.   -->
+    <PackageReference Include="TorchSharp" Version="0.105.1" />
+    <PackageReference Include="TorchSharp-cpu" Version="0.105.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LongShot.Engine\LongShot.Engine.csproj" />
+  </ItemGroup>
+</Project>

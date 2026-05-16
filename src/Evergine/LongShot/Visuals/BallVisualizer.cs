@@ -1,7 +1,7 @@
 ﻿using Evergine.Components.Graphics3D;
 using Evergine.Framework;
 using Evergine.Framework.Graphics;
-using Longshot.Engine;
+using LongShot.Engine;
 using Longshot.Utils;
 
 namespace Longshot.Visuals;

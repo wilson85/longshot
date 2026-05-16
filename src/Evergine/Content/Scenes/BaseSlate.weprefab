@@ -33,7 +33,7 @@ Root:
       IsCullingEnabled: true
       IsEnabled: true
       OrderBias: 0
-      RenderFlags: CastShadows
+      RenderFlags: None
     - !Evergine.Components.Graphics3D.PlaneMesh,Evergine.Components
       Id: 55783437-3348-42dc-b22b-e3598908d819
       Height: 1.0

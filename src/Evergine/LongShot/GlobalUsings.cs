@@ -1,11 +1,11 @@
 ﻿global using System;
 global using System.Collections.Generic;
-global using Longshot.Engine;
+global using LongShot.Engine;
+global using Longshot.Audio;
 global using Longshot.Gameplay.Cue;
 global using Longshot.Gameplay.Table;
 global using Longshot.Utils;
 global using Longshot.Visuals;
-global using LongShot.Engine;
 global using Evergine.Common.Attributes;
 global using Evergine.Common.Input.Keyboard;
 global using Evergine.Common.Input.Mouse;

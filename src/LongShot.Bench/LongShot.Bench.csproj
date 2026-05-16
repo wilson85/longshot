@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>LongShot.Bench</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="SkiaSharp" Version="3.116.1" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="3.116.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LongShot.Engine\LongShot.Engine.csproj" />
+    <ProjectReference Include="..\LongShot.Shot\LongShot.Shot.csproj" />
+    <ProjectReference Include="..\LongShot.Rules\LongShot.Rules.csproj" />
+  </ItemGroup>
+</Project>

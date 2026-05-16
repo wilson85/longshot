@@ -6,8 +6,9 @@ DefaultProfile:
   Platform: Undefined
 ExportAsRaw: false
 MaterialInfo:
-  Id: 97e4a9e8-b292-41bf-80cb-3e1435be82aa
+  Id: a7984941-60b4-4bf9-b438-165949fc0b8b
   ActiveDirectives:
+    - CLEAR
     - IBL
     - LIT
   AllowInstancing: false
@@ -83,10 +84,10 @@ MaterialInfo:
       ValueByteArray: AAAAAA==
     - Name: ClearCoat
       Type: System.Single
-      ValueByteArray: AAAAAA==
+      ValueByteArray: AABAPw==
     - Name: ClearCoatRoughness
       Type: System.Single
-      ValueByteArray: AAAAAA==
+      ValueByteArray: CtcjPA==
     - Name: TextureOffset0
       Type: Evergine.Mathematics.Vector2,Evergine.Mathematics
       ValueByteArray: AAAAAAAAAAA=
