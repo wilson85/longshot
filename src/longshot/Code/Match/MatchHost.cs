@@ -143,6 +143,23 @@ public sealed class MatchHost : Component
     /// <summary>Tint applied to leg ModelRenderers. Default: same dark walnut as the rails.</summary>
     [Property] public Color LegColor { get; set; } = new Color(0.20f, 0.12f, 0.07f);
 
+    // -------------------- Sound --------------------
+
+    /// <summary>Master volume multiplier for all impact / pocket / cue sounds (0 = mute).</summary>
+    [Property, Range(0f, 1f)] public float SoundMasterVolume { get; set; } = 0.85f;
+
+    /// <summary>
+    /// Reference speed (m/s) at which an impact plays at full volume. Lower → quieter impacts get
+    /// audible faster. Reasonable: 2–4 m/s (typical hard cue shot is ~3 m/s at the ball).
+    /// </summary>
+    [Property, Range(0.5f, 10f)] public float SoundVolumeReferenceSpeed { get; set; } = 3f;
+
+    /// <summary>Half-range of random pitch jitter applied per impact (e.g. 0.08 → pitch ∈ [0.92, 1.08]).</summary>
+    [Property, Range(0f, 0.4f)] public float SoundPitchJitter { get; set; } = 0.08f;
+
+    /// <summary>If true, MatchHost loads built-in s&amp;box physics SoundFiles and plays them on engine events.</summary>
+    [Property] public bool EnableSound { get; set; } = true;
+
     private BilliardsEngine _engine;
     private readonly List<GameObject> _ballObjects = new();
     private readonly List<GameObject> _tableObjects = new();
@@ -177,6 +194,18 @@ public sealed class MatchHost : Component
     /// <summary>Ball-state snapshot captured immediately before the most recent <see cref="Strike"/>. Used by <see cref="Replay"/>.</summary>
     private BallState[] _replaySnapshot;
 
+    // --- Sound ---
+    /// <summary>Plastic-impact variants for ball-ball collisions (random selection per event).</summary>
+    private SoundFile[] _ballHitSounds;
+    /// <summary>Wood-impact variants for ball-cushion (rail) collisions.</summary>
+    private SoundFile[] _railHitSounds;
+    /// <summary>Wood-small-impact variants for cue tip striking the cue ball.</summary>
+    private SoundFile[] _cueStrikeSounds;
+    /// <summary>Wood-small-impact variants for pocketing drop (softer than rail impact).</summary>
+    private SoundFile[] _pocketDropSounds;
+    /// <summary>RNG for sound variant + pitch jitter. Separate from the engine RNG so sound randomness never affects physics determinism.</summary>
+    private System.Random _soundRng = new System.Random();
+
     // --- Rules + per-shot lifecycle ---
     private EightBallRules _rules;
     private ShotRecorder _recorder;
@@ -200,6 +229,7 @@ public sealed class MatchHost : Component
         var def = TableDefinition.BuildWpaStandard();
         var (rails, pockets) = TableBuilder.Build(def);
         _engine.InitializeMatch(rails, pockets);
+        LoadSoundsAndHookEvents();
 
         if (SpawnTableVisuals)
         {
@@ -315,6 +345,108 @@ public sealed class MatchHost : Component
         {
             Log.Warning($"{nameof(MatchHost)}: no CameraComponent found in the scene. Camera control disabled.");
         }
+    }
+
+    /// <summary>
+    /// Load built-in s&amp;box physics SoundFiles for impacts / pocket drops / cue strike, then subscribe
+    /// to the engine's event stream so each physics event plays an appropriate sound with
+    /// speed/force-modulated volume + a small pitch jitter for variety.
+    /// <para>
+    /// Files used (all under <c>sounds/physics/</c>):
+    /// <list type="bullet">
+    ///   <item>Ball-ball:  <c>phys-impact-plastic-{1-4}.vsnd</c> — sharp hollow plastic clack, closest to phenolic ball impact</item>
+    ///   <item>Cushion:    <c>phys-impact-wood-{1-4}.vsnd</c>    — duller wood thud (rails are wood-framed)</item>
+    ///   <item>Cue strike: <c>phys-impact-wood-small-{1-4}.vsnd</c> — short sharp tip-on-ball click</item>
+    ///   <item>Pocket:     <c>phys-impact-wood-small-{1-4}.vsnd</c> — softer drop variant (re-uses cue-strike pool)</item>
+    /// </list>
+    /// </para>
+    /// </summary>
+    private void LoadSoundsAndHookEvents()
+    {
+        if (!EnableSound) return;
+
+        _ballHitSounds    = LoadVariants("sounds/physics/phys-impact-plastic-",     4);
+        _railHitSounds    = LoadVariants("sounds/physics/phys-impact-wood-",        4);
+        _cueStrikeSounds  = LoadVariants("sounds/physics/phys-impact-wood-small-",  4);
+        _pocketDropSounds = _cueStrikeSounds;    // smaller wood thuds suit pocket-drop too
+
+        _engine.OnBallContact  += HandleBallContactSound;
+        _engine.OnRailContact  += HandleRailContactSound;
+        _engine.OnJawContact   += HandleRailContactSound;   // jaws share the wood/cushion sound
+        _engine.OnBallPocketed += HandlePocketDropSound;
+        _engine.OnCueStrike    += HandleCueStrikeSound;
+    }
+
+    /// <summary>Helper: load <paramref name="count"/> consecutively-numbered SoundFiles (1-based).</summary>
+    private static SoundFile[] LoadVariants(string pathPrefix, int count)
+    {
+        var arr = new SoundFile[count];
+        for (int i = 0; i < count; i++)
+        {
+            arr[i] = SoundFile.Load($"{pathPrefix}{i + 1}.vsnd");
+        }
+        return arr;
+    }
+
+    /// <summary>
+    /// Play a random variant from <paramref name="pool"/> at <paramref name="worldPos"/> with volume/pitch
+    /// derived from <paramref name="speedOrForce"/>. Volume scales linearly with speed up to
+    /// <see cref="SoundVolumeReferenceSpeed"/>, clamped to [0.08, 1.0] so even soft contacts are audible.
+    /// Pitch is base ± SoundPitchJitter plus a small speed-coupled term (faster = slightly higher).
+    /// No-op if the pool is empty/null (failed loads).
+    /// </summary>
+    private void PlayImpactSound(SoundFile[] pool, Vector3 worldPos, float speedOrForce)
+    {
+        if (!EnableSound || pool is null || pool.Length == 0) return;
+
+        var snd = pool[_soundRng.Next(pool.Length)];
+        if (snd is null) return;
+
+        float normSpeed = MathX.Clamp(speedOrForce / SoundVolumeReferenceSpeed, 0f, 1f);
+        float volume    = MathX.Clamp(0.08f + 0.92f * normSpeed, 0.08f, 1f) * SoundMasterVolume;
+        float jitter    = ((float)_soundRng.NextDouble() - 0.5f) * 2f * SoundPitchJitter;
+        float pitch     = 1f + jitter + (normSpeed - 0.5f) * 0.20f;
+
+        var handle = Sound.PlayFile(snd, volume, pitch, delay: 0f);
+        if (handle is not null) handle.Position = worldPos;
+    }
+
+    /// <summary>Ball-ball collision: position at midpoint, "speed" = max of either ball's post-collision linear speed.</summary>
+    private void HandleBallContactSound(int ballA, int ballB)
+    {
+        var states = _engine.PhysicsStates;
+        if (ballA < 0 || ballA >= states.Length || ballB < 0 || ballB >= states.Length) return;
+        SnVec3 midEngine = (states[ballA].Position + states[ballB].Position) * 0.5f;
+        float speed = MathF.Max(states[ballA].LinearVelocity.Length(), states[ballB].LinearVelocity.Length());
+        PlayImpactSound(_ballHitSounds, Conversions.EngineToWorld(midEngine), speed);
+    }
+
+    /// <summary>Cushion / jaw collision: position at the ball, impact speed supplied by the engine event.</summary>
+    private void HandleRailContactSound(int ballId, int _, float impactSpeed)
+    {
+        var states = _engine.PhysicsStates;
+        if (ballId < 0 || ballId >= states.Length) return;
+        PlayImpactSound(_railHitSounds, Conversions.EngineToWorld(states[ballId].Position), impactSpeed);
+    }
+
+    /// <summary>Pocket drop: play at the pocket position the engine reports. Quieter / lower-pitch by reusing the small-wood pool.</summary>
+    private void HandlePocketDropSound(int ballId, SnVec3 dropPosEngine)
+    {
+        // Use ball linear-speed-at-drop as a proxy for "drop intensity". States may already be Pocketed
+        // by the time the event fires, but we read the velocity-just-before for a sensible volume.
+        var states = _engine.PhysicsStates;
+        float speed = (ballId >= 0 && ballId < states.Length) ? states[ballId].LinearVelocity.Length() : 1f;
+        PlayImpactSound(_pocketDropSounds, Conversions.EngineToWorld(dropPosEngine), speed * 0.7f);
+    }
+
+    /// <summary>Cue strike: position at the cue ball, "speed" = cue impulse force (the only physics-meaningful intensity available here).</summary>
+    private void HandleCueStrikeSound(int ballId, SnVec3 _, float force, SnVec3 __)
+    {
+        var states = _engine.PhysicsStates;
+        if (ballId < 0 || ballId >= states.Length) return;
+        // Force in N·s; for a 0.18 kg ball, force/mass ≈ initial speed. Map directly to the speed scale.
+        float speedProxy = force / GameSettings.BallMass;
+        PlayImpactSound(_cueStrikeSounds, Conversions.EngineToWorld(states[ballId].Position), speedProxy);
     }
 
     /// <summary>
