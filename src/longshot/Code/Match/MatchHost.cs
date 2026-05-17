@@ -115,7 +115,10 @@ public sealed class MatchHost : Component
     [Property, Range(0.005f, 1f)] public float StrokeSensitivity { get; set; } = 0.08f;
 
     /// <summary>Multiplicative step applied when the player presses + or - to adjust <see cref="StrokeSensitivity"/>.</summary>
-    [Property, Range(1.02f, 1.5f)] public float StrokeSensitivityStep { get; set; } = 1.15f;
+    [Property, Range(1.01f, 1.5f)] public float StrokeSensitivityStep { get; set; } = 1.10f;
+
+    /// <summary>Smaller multiplicative step used when Shift is held during + / - (fine adjust).</summary>
+    [Property, Range(1.005f, 1.05f)] public float StrokeSensitivityFineStep { get; set; } = 1.02f;
 
     /// <summary>Cookie key used to persist <see cref="StrokeSensitivity"/> between sessions.</summary>
     private const string CookieStrokeSensitivity = "longshot.stroke_sensitivity";
@@ -469,16 +472,17 @@ public sealed class MatchHost : Component
     }
 
     /// <summary>
-    /// Adjust <see cref="StrokeSensitivity"/> multiplicatively (×<see cref="StrokeSensitivityStep"/> on +,
-    /// ÷step on -), clamped to a sensible range, and persist to <c>Game.Cookies</c>.
+    /// Adjust <see cref="StrokeSensitivity"/> multiplicatively (×step on +, ÷step on -), clamped to a
+    /// sensible range, and persist to <c>Game.Cookies</c>. With <paramref name="fine"/> = true (Shift
+    /// modifier) the smaller <see cref="StrokeSensitivityFineStep"/> is used for precise adjustments.
     /// </summary>
-    private void AdjustStrokeSensitivity(bool increase)
+    private void AdjustStrokeSensitivity(bool increase, bool fine)
     {
-        float step = MathF.Max(1.01f, StrokeSensitivityStep);
+        float step = MathF.Max(1.001f, fine ? StrokeSensitivityFineStep : StrokeSensitivityStep);
         float factor = increase ? step : 1f / step;
         StrokeSensitivity = MathX.Clamp(StrokeSensitivity * factor, 0.005f, 1f);
         SaveStrokeSensitivityToCookies();
-        Log.Info($"{nameof(MatchHost)}: stroke sensitivity → {StrokeSensitivity:0.000} u/px (saved).");
+        Log.Info($"{nameof(MatchHost)}: stroke sensitivity → {StrokeSensitivity:0.0000} u/px{(fine ? " (fine)" : "")} (saved).");
     }
 
     /// <summary>
@@ -718,7 +722,7 @@ public sealed class MatchHost : Component
         overlay.ScreenText(new Vector2(w - 280, 60),  "B + mouse   butt elevation",          size: 14, color: hudColour);
         overlay.ScreenText(new Vector2(w - 280, 80),  "RMB         overhead view",           size: 14, color: hudColour);
         overlay.ScreenText(new Vector2(w - 280, 100), "R           replay last shot",        size: 14, color: hudColour);
-        overlay.ScreenText(new Vector2(w - 280, 120), $"+ / -       sensitivity {StrokeSensitivity:0.000}", size: 14, color: new Color(0.85f, 0.85f, 0.55f));
+        overlay.ScreenText(new Vector2(w - 280, 120), $"+ / -       sensitivity {StrokeSensitivity:0.0000}  (hold Shift for fine)", size: 14, color: new Color(0.85f, 0.85f, 0.55f));
 
         // ---- Bottom-centre: power readouts ----
         // While stroking: two readouts side-by-side — "draw" (how far we've pulled back) on the left,
@@ -785,9 +789,11 @@ public sealed class MatchHost : Component
         }
 
         // -- Sensitivity adjust (+ / -). Persists to Game.Cookies on every change. --
-        // The '+' key requires shift on most keyboards, so we also accept the bare '=' key (same physical key).
-        if (Input.Keyboard.Pressed("=") || Input.Keyboard.Pressed("+"))   AdjustStrokeSensitivity(increase: true);
-        if (Input.Keyboard.Pressed("-"))                                   AdjustStrokeSensitivity(increase: false);
+        // The '+' key requires shift on most keyboards, so we accept '=' as the bare-key alternative.
+        // Holding Shift uses the finer step for precise tuning at low sensitivities.
+        bool shiftHeld = Input.Keyboard.Down("shift") || Input.Keyboard.Down("lshift") || Input.Keyboard.Down("rshift");
+        if (Input.Keyboard.Pressed("=") || Input.Keyboard.Pressed("+"))   AdjustStrokeSensitivity(increase: true,  fine: shiftHeld);
+        if (Input.Keyboard.Pressed("-"))                                   AdjustStrokeSensitivity(increase: false, fine: shiftHeld);
 
         // ---- Mode-driven input handling. Priority: stroke > english > elevation > free aim. ----
         if (_shotInFlight)
