@@ -240,11 +240,7 @@ public sealed class MatchHost : Component
             BuildTableVisuals(def, rails, pockets);
         }
 
-        // First-light rack: cue (id 0) + one solid (id 1). Enough to test the open-table →
-        // group-assignment path. Full 16-ball rack is a follow-up — for now we only need
-        // enough balls to verify the per-shot lifecycle wiring works.
-        _engine.AddBall(new SnVec3(0, GameSettings.BallRadius, -0.8f), BallType.Cue);
-        _engine.AddBall(new SnVec3(0, GameSettings.BallRadius,  0.8f), BallType.Normal);
+        RackEightBall();
 
         float diameterUnits = Conversions.MetresToUnits(GameSettings.BallRadius * 2f);
         // Core dev sphere is a local asset and works at runtime (unlike mounted cloud .vmdl assets).
@@ -263,14 +259,14 @@ public sealed class MatchHost : Component
             }
             else if (sphereFallback is not null)
             {
-                // Procedural fallback: spawn a ModelRenderer'd sphere. The dev sphere is 50u native.
+                // Procedural fallback: spawn a ModelRenderer'd sphere. The dev sphere is 64u diameter.
                 go = Scene.CreateObject(true);
                 go.Name = $"Ball_{i}";
                 float ballScale = diameterUnits / DevSphereNativeSize;
                 go.LocalScale = new Vector3(ballScale, ballScale, ballScale);
                 var mr = go.AddComponent<ModelRenderer>();
                 mr.Model = sphereFallback;
-                mr.Tint  = Color.White;
+                mr.Tint  = BallTintForId(i);
             }
             else
             {
@@ -350,6 +346,87 @@ public sealed class MatchHost : Component
             Log.Warning($"{nameof(MatchHost)}: no CameraComponent found in the scene. Camera control disabled.");
         }
     }
+
+    /// <summary>
+    /// Build the standard 16-ball 8-ball rack: cue at the head spot, 15 numbered balls in an equilateral
+    /// triangle with its apex at the foot spot. Layout (apex toward head rail, base toward foot rail):
+    /// <code>
+    ///            1
+    ///           2 9
+    ///          3 8 10
+    ///         4 11 12 5
+    ///        6 13 7 14 15
+    /// </code>
+    /// Satisfies the WPA rack rules: 8 in the centre of row 2; back corners (positions 6 and 15) are a
+    /// solid/stripe mix; apex is 1.
+    /// <para>
+    /// Coordinates are in the engine's Y-up frame (X = across table, Y = up, Z = along table length).
+    /// Head spot Z = -L/4, foot spot Z = +L/4. Row spacing = √3/2 × ball diameter (equilateral). A tiny
+    /// epsilon is added between balls so the CCD doesn't fire instantaneous events on touching contacts.
+    /// </para>
+    /// </summary>
+    private void RackEightBall()
+    {
+        // Per-ball position in the triangle: (row, columnWithinRow).
+        // Row 0 (apex toward head) has 1 column; row 4 (base) has 5.
+        var rackPositions = new (int row, int col)[]
+        {
+            (0, 0),                       // 1 (apex)
+            (1, 0), (2, 0), (3, 0),       // 2, 3, 4 (left edge)
+            (3, 3), (4, 0), (4, 2),       // 5, 6, 7
+            (2, 1),                       // 8 (centre of row 2)
+            (1, 1), (2, 2), (3, 1),       // 9, 10, 11
+            (3, 2), (4, 1), (4, 3),       // 12, 13, 14
+            (4, 4),                       // 15
+        };
+
+        float diameter = GameSettings.BallRadius * 2f;
+        float epsilon  = 1e-4f;            // ~0.1 mm pad so balls aren't bitwise-touching at rest
+        float dx       = diameter + epsilon;
+        float dz       = (MathF.Sqrt(3f) * 0.5f) * (diameter + epsilon);
+        float footSpotZ = +GameSettings.TableLength * 0.25f;
+        float headSpotZ = -GameSettings.TableLength * 0.25f;
+        float y         = GameSettings.BallRadius;
+
+        // Cue ball at head spot.
+        _engine.AddBall(new SnVec3(0, y, headSpotZ), BallType.Cue);
+
+        // 15 numbered balls. The id returned by AddBall is sequential (1..15), matching the rules
+        // convention (1–7 solids, 8 eight, 9–15 stripes).
+        for (int idMinus1 = 0; idMinus1 < rackPositions.Length; idMinus1++)
+        {
+            var (row, col) = rackPositions[idMinus1];
+            float x = (col - row * 0.5f) * dx;
+            float z = footSpotZ + row * dz;
+            _engine.AddBall(new SnVec3(x, y, z), BallType.Normal);
+        }
+    }
+
+    /// <summary>
+    /// Tint for the ball at engine id <paramref name="id"/>. Cue (0) is white; solids (1–7) are saturated
+    /// pool-ball colours; the 8-ball is near-black; stripes (9–15) are pastel versions of the matching
+    /// solid colours so they read as "the lighter one" without needing a textured surface.
+    /// </summary>
+    private static Color BallTintForId(int id) => id switch
+    {
+        0  => Color.White,
+        1  => new Color(1.00f, 0.85f, 0.05f),  // yellow
+        2  => new Color(0.05f, 0.25f, 0.85f),  // blue
+        3  => new Color(0.95f, 0.10f, 0.10f),  // red
+        4  => new Color(0.45f, 0.05f, 0.70f),  // purple
+        5  => new Color(1.00f, 0.45f, 0.00f),  // orange
+        6  => new Color(0.05f, 0.55f, 0.20f),  // green
+        7  => new Color(0.55f, 0.05f, 0.10f),  // maroon
+        8  => new Color(0.04f, 0.04f, 0.04f),  // black
+        9  => new Color(1.00f, 0.90f, 0.55f),  // pale yellow stripe
+        10 => new Color(0.45f, 0.65f, 1.00f),  // pale blue stripe
+        11 => new Color(1.00f, 0.55f, 0.55f),  // pale red stripe
+        12 => new Color(0.75f, 0.50f, 0.95f),  // pale purple stripe
+        13 => new Color(1.00f, 0.70f, 0.45f),  // pale orange stripe
+        14 => new Color(0.45f, 0.85f, 0.55f),  // pale green stripe
+        15 => new Color(0.90f, 0.50f, 0.55f),  // pale maroon stripe
+        _  => Color.White,
+    };
 
     /// <summary>
     /// Load built-in s&amp;box physics SoundFiles for impacts / pocket drops / cue strike, then subscribe
