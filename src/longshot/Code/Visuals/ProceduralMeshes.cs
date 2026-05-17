@@ -86,6 +86,126 @@ internal static class ProceduralMeshes
         BuildBox(new Vector3(width * 0.5f, depth * 0.5f, thickness * 0.5f), material);
 
     /// <summary>
+    /// Build a tapered cylinder along the local +X axis: the butt at <c>x = -length/2</c> with radius
+    /// <paramref name="buttRadius"/>, the tip at <c>x = +length/2</c> with radius <paramref name="tipRadius"/>,
+    /// approximated as a regular n-gon prism with <paramref name="segments"/> sides around the circumference.
+    /// <para>
+    /// Smooth-shaded side walls: shared ring vertices carry per-vertex radial normals so the surface reads
+    /// as a smooth cylinder despite the polygonal cross-section. End caps are flat-shaded (their own
+    /// vertex set with axial normals). Designed for the cue stick — local +X is the cue length axis, with
+    /// the tip at +X end.
+    /// </para>
+    /// </summary>
+    /// <param name="length">Total length of the cue along local X (units).</param>
+    /// <param name="buttRadius">Cross-section radius at the butt end (-X). 0.55u ≈ 28 mm diameter.</param>
+    /// <param name="tipRadius">Cross-section radius at the tip end (+X). 0.25u ≈ 13 mm diameter.</param>
+    /// <param name="segments">Number of sides around the circumference. 16+ reads as smooth at cue scale.</param>
+    /// <param name="material">Material; defaults to <c>materials/default.vmat</c> if null.</param>
+    public static Model BuildTaperedCylinder(float length, float buttRadius, float tipRadius, int segments = 16, Material material = null)
+    {
+        if (segments < 3) segments = 3;
+
+        material ??= Material.Load("materials/default.vmat");
+        var mesh = new Mesh(material);
+
+        int n = segments;
+        var verts = new List<SimpleVertex>(4 * n + 2);
+        var indices = new List<int>(12 * n);
+
+        float halfLen = length * 0.5f;
+        float buttX = -halfLen;
+        float tipX  = +halfLen;
+
+        // -------- Butt cap (normal -X). Fan from a centre vertex; ring is CW in YZ when viewed from -X. --------
+        int buttCenterIdx = verts.Count;
+        verts.Add(new SimpleVertex(new Vector3(buttX, 0, 0), new Vector3(-1, 0, 0), new Vector3(0, 1, 0), new Vector2(0.5f, 0.5f)));
+        int buttCapRingBase = verts.Count;
+        for (int i = 0; i < n; i++)
+        {
+            float a = (i / (float)n) * MathF.PI * 2f;
+            float c = MathF.Cos(a), s = MathF.Sin(a);
+            verts.Add(new SimpleVertex(
+                new Vector3(buttX, buttRadius * c, buttRadius * s),
+                new Vector3(-1, 0, 0),
+                new Vector3(0, 1, 0),
+                new Vector2(0.5f + 0.5f * c, 0.5f + 0.5f * s)));
+        }
+        for (int i = 0; i < n; i++)
+        {
+            indices.Add(buttCenterIdx);
+            indices.Add(buttCapRingBase + ((i + 1) % n));
+            indices.Add(buttCapRingBase + i);
+        }
+
+        // -------- Tip cap (normal +X). --------
+        int tipCenterIdx = verts.Count;
+        verts.Add(new SimpleVertex(new Vector3(tipX, 0, 0), new Vector3(1, 0, 0), new Vector3(0, 1, 0), new Vector2(0.5f, 0.5f)));
+        int tipCapRingBase = verts.Count;
+        for (int i = 0; i < n; i++)
+        {
+            float a = (i / (float)n) * MathF.PI * 2f;
+            float c = MathF.Cos(a), s = MathF.Sin(a);
+            verts.Add(new SimpleVertex(
+                new Vector3(tipX, tipRadius * c, tipRadius * s),
+                new Vector3(1, 0, 0),
+                new Vector3(0, 1, 0),
+                new Vector2(0.5f + 0.5f * c, 0.5f + 0.5f * s)));
+        }
+        for (int i = 0; i < n; i++)
+        {
+            indices.Add(tipCenterIdx);
+            indices.Add(tipCapRingBase + i);
+            indices.Add(tipCapRingBase + ((i + 1) % n));
+        }
+
+        // -------- Side walls. Per-vertex radial normals for smooth shading; each quad winds CCW from outside. --------
+        int sideRingButtBase = verts.Count;
+        for (int i = 0; i < n; i++)
+        {
+            float a = (i / (float)n) * MathF.PI * 2f;
+            float c = MathF.Cos(a), s = MathF.Sin(a);
+            verts.Add(new SimpleVertex(
+                new Vector3(buttX, buttRadius * c, buttRadius * s),
+                new Vector3(0, c, s),                                       // outward radial normal
+                new Vector3(1, 0, 0),                                       // tangent along cue length
+                new Vector2(i / (float)n, 0)));
+        }
+        int sideRingTipBase = verts.Count;
+        for (int i = 0; i < n; i++)
+        {
+            float a = (i / (float)n) * MathF.PI * 2f;
+            float c = MathF.Cos(a), s = MathF.Sin(a);
+            verts.Add(new SimpleVertex(
+                new Vector3(tipX, tipRadius * c, tipRadius * s),
+                new Vector3(0, c, s),
+                new Vector3(1, 0, 0),
+                new Vector2(i / (float)n, 1)));
+        }
+        for (int i = 0; i < n; i++)
+        {
+            int next = (i + 1) % n;
+            int bi = sideRingButtBase + i;
+            int bn = sideRingButtBase + next;
+            int ti = sideRingTipBase  + i;
+            int tn = sideRingTipBase  + next;
+            // CCW from outside: (butt-i, tip-next, tip-i) + (butt-i, butt-next, tip-next).
+            indices.Add(bi); indices.Add(tn); indices.Add(ti);
+            indices.Add(bi); indices.Add(bn); indices.Add(tn);
+        }
+
+        mesh.CreateVertexBuffer(verts.Count, verts);
+        mesh.CreateIndexBuffer(indices.Count, indices);
+
+        float maxR = MathF.Max(buttRadius, tipRadius);
+        mesh.Bounds = new BBox(new Vector3(buttX, -maxR, -maxR), new Vector3(tipX, +maxR, +maxR));
+
+        return Model.Builder
+            .WithName($"proccue-l{length:0.##}-b{buttRadius:0.##}-t{tipRadius:0.##}-n{n}")
+            .AddMesh(mesh)
+            .Create();
+    }
+
+    /// <summary>
     /// Extrude a 2D outline polygon vertically (along Z) into a prism. The outline is taken as a
     /// closed loop of points in the XY plane (each point connects to the next, and the last to the
     /// first). Caps are emitted at <c>z = ±halfHeight</c> with per-face normals; side walls are

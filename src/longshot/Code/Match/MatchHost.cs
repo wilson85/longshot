@@ -98,8 +98,29 @@ public sealed class MatchHost : Component
     /// <summary>Cue stick length (units). Real cues ≈ 56″ ≈ 56u (1u = 1 inch).</summary>
     [Property, Range(20f, 80f)] public float CueLengthUnits { get; set; } = 56f;
 
-    /// <summary>Cue stick radius at the visual mesh (units). 0.4u ≈ 20 mm diameter.</summary>
-    [Property, Range(0.1f, 2f)] public float CueRadiusUnits { get; set; } = 0.4f;
+    /// <summary>Cue radius at the butt end (units). 0.55u ≈ 28 mm diameter — standard pool cue butt.</summary>
+    [Property, Range(0.1f, 2f)] public float CueButtRadiusUnits { get; set; } = 0.55f;
+
+    /// <summary>Cue radius at the tip end (units). 0.25u ≈ 13 mm diameter — standard pool cue tip.</summary>
+    [Property, Range(0.05f, 1f)] public float CueTipRadiusUnits { get; set; } = 0.25f;
+
+    /// <summary>Number of segments around the cue's circumference. 16+ reads as smooth at cue scale.</summary>
+    [Property, Range(6f, 32f)] public int CueSegments { get; set; } = 16;
+
+    /// <summary>Fraction of the cue length covered by the grip wrap at the butt end (0 = no wrap, 0.3 = back 30%).</summary>
+    [Property, Range(0f, 0.5f)] public float CueGripFraction { get; set; } = 0.30f;
+
+    /// <summary>Tint applied to the cue's grip wrap (butt section). Default: dark navy linen.</summary>
+    [Property] public Color CueGripColor { get; set; } = new Color(0.10f, 0.12f, 0.20f);
+
+    /// <summary>Fraction of cue length at the tip end painted as the ferrule (white plastic before the leather tip).</summary>
+    [Property, Range(0f, 0.05f)] public float CueFerruleFraction { get; set; } = 0.015f;
+
+    /// <summary>Tint applied to the cue's ferrule (just behind the tip). Off-white plastic.</summary>
+    [Property] public Color CueFerruleColor { get; set; } = new Color(0.95f, 0.95f, 0.90f);
+
+    /// <summary>Tint applied to the cue's leather tip (the contact pad).</summary>
+    [Property] public Color CueTipColor { get; set; } = new Color(0.45f, 0.25f, 0.15f);
 
     /// <summary>Distance the cue's tip is pulled back from the cue ball when at rest (units).</summary>
     [Property, Range(0f, 20f)] public float CueDrawbackUnits { get; set; } = 4f;
@@ -341,24 +362,86 @@ public sealed class MatchHost : Component
     }
 
     /// <summary>
-    /// Build a procedural cue stick mesh (long thin box, tip at local +X end) and spawn it as a
-    /// renderable GameObject. The mesh is centred on its own origin; <see cref="UpdateAimRig"/> places
-    /// it each frame so the tip sits behind the cue ball at the configured drawback distance.
+    /// Build the cue as a small hierarchy: an empty parent <see cref="_cueStickGo"/> whose local +X is the
+    /// cue length axis (tip at +X), with three child renderers that together read as a realistic pool cue:
+    /// <list type="bullet">
+    ///   <item>shaft – tapered cylinder, butt → tip, light maple colour;</item>
+    ///   <item>grip wrap – uniform cylinder covering the back <see cref="CueGripFraction"/> of the shaft,
+    ///         slightly fatter so it sits proud of the wood; dark linen colour;</item>
+    ///   <item>tip – tiny uniform cylinder at the +X end, very slightly fatter than the shaft tip so it
+    ///         shows as a leather pad rather than z-fighting the shaft cap.</item>
+    /// </list>
+    /// <see cref="UpdateAimRig"/> positions the parent each frame so the tip sits behind the cue ball at
+    /// the configured drawback distance; the children inherit the transform automatically.
     /// </summary>
     private void SpawnCueStick()
     {
         var material = Material.Load("materials/default.vmat");
-        // Box with X = half-length, Y = radius, Z = radius. Tip at +X end (local) → world aim direction
-        // after Rotation.LookAt(aimDir) below.
-        var cueModel = ProceduralMeshes.BuildBox(
-            new Vector3(CueLengthUnits * 0.5f, CueRadiusUnits, CueRadiusUnits),
-            material);
+        float halfLen = CueLengthUnits * 0.5f;
 
+        // ---- Parent: an empty GameObject; we don't put a renderer here so the inspector tree stays clean. ----
         _cueStickGo = Scene.CreateObject(true);
         _cueStickGo.Name = "CueStick";
-        var mr = _cueStickGo.AddComponent<ModelRenderer>();
-        mr.Model = cueModel;
-        mr.Tint = CueColor;
+
+        // ---- 1. Shaft (tapered cylinder, light wood). Centred on local origin. ----
+        var shaftModel = ProceduralMeshes.BuildTaperedCylinder(
+            length: CueLengthUnits,
+            buttRadius: CueButtRadiusUnits,
+            tipRadius:  CueTipRadiusUnits,
+            segments:   CueSegments,
+            material:   material);
+        var shaftGo = Scene.CreateObject(true);
+        shaftGo.Name = "CueStick.Shaft";
+        shaftGo.SetParent(_cueStickGo);
+        shaftGo.LocalPosition = Vector3.Zero;
+        shaftGo.LocalRotation = Rotation.Identity;
+        var shaftMr = shaftGo.AddComponent<ModelRenderer>();
+        shaftMr.Model = shaftModel;
+        shaftMr.Tint = CueColor;
+
+        // ---- 2. Grip wrap. Uniform cylinder over the back CueGripFraction of the shaft, slightly proud. ----
+        if (CueGripFraction > 0.001f)
+        {
+            float gripLen     = CueLengthUnits * CueGripFraction;
+            float gripRadius  = CueButtRadiusUnits * 1.05f;
+            var gripModel = ProceduralMeshes.BuildTaperedCylinder(
+                length:     gripLen,
+                buttRadius: gripRadius,
+                tipRadius:  gripRadius,                      // uniform → not actually tapered
+                segments:   CueSegments,
+                material:   material);
+            var gripGo = Scene.CreateObject(true);
+            gripGo.Name = "CueStick.Grip";
+            gripGo.SetParent(_cueStickGo);
+            // Grip occupies local X ∈ [-halfLen, -halfLen + gripLen]; centre = -halfLen + gripLen/2.
+            gripGo.LocalPosition = new Vector3(-halfLen + gripLen * 0.5f, 0, 0);
+            gripGo.LocalRotation = Rotation.Identity;
+            var gripMr = gripGo.AddComponent<ModelRenderer>();
+            gripMr.Model = gripModel;
+            gripMr.Tint = CueGripColor;
+        }
+
+        // ---- 3. Tip (leather pad). Tiny uniform cylinder at the +X end, just barely fatter than the shaft tip. ----
+        if (CueFerruleFraction > 0.0001f)
+        {
+            float tipLen     = CueLengthUnits * CueFerruleFraction;
+            float tipMeshRad = CueTipRadiusUnits * 1.04f;
+            var tipModel = ProceduralMeshes.BuildTaperedCylinder(
+                length:     tipLen,
+                buttRadius: tipMeshRad,
+                tipRadius:  tipMeshRad,
+                segments:   CueSegments,
+                material:   material);
+            var tipGo = Scene.CreateObject(true);
+            tipGo.Name = "CueStick.Tip";
+            tipGo.SetParent(_cueStickGo);
+            // Tip occupies local X ∈ [+halfLen - tipLen, +halfLen]; centre = +halfLen - tipLen/2.
+            tipGo.LocalPosition = new Vector3(+halfLen - tipLen * 0.5f, 0, 0);
+            tipGo.LocalRotation = Rotation.Identity;
+            var tipMr = tipGo.AddComponent<ModelRenderer>();
+            tipMr.Model = tipModel;
+            tipMr.Tint = CueTipColor;
+        }
     }
 
     /// <summary>
