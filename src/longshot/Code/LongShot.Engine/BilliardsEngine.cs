@@ -1,5 +1,5 @@
 using System;
-using System.Numerics;
+using SnVector3 = System.Numerics.Vector3;
 
 namespace LongShot.Engine;
 
@@ -22,7 +22,7 @@ public sealed class BilliardsEngine
     /// </summary>
     public float InterpolationAlpha => _accumulator / GameSettings.FixedStep;
 
-    public event Action<int, Vector3> OnBallPocketed;
+    public event Action<int, SnVector3> OnBallPocketed;
 
     /// <summary>
     /// Fires immediately after a ball-ball collision is resolved, with the two ball IDs
@@ -33,7 +33,7 @@ public sealed class BilliardsEngine
     public event Action<int, int> OnBallContact;
 
     /// <summary>Fires AFTER a cue strike has been applied. Args: cueBallId, aimDirectionRaw, force, hitOffset.</summary>
-    public event Action<int, Vector3, float, Vector3> OnCueStrike;
+    public event Action<int, SnVector3, float, SnVector3> OnCueStrike;
 
     /// <summary>
     /// Fires AFTER a ball bounces off a rail cushion. Args: ballId, railSegmentIndex, impactSpeed (m/s,
@@ -65,7 +65,7 @@ public sealed class BilliardsEngine
     /// Adds a ball at the given position. Returns its assigned ID (cue ball is conventionally ID 0).
     /// The <see cref="BallType"/> is a host-side hint; the engine doesn't store it or branch on it.
     /// </summary>
-    public int AddBall(Vector3 position, BallType type = BallType.Normal)
+    public int AddBall(SnVector3 position, BallType type = BallType.Normal)
     {
         int id = ActiveBallCount++;
         _physicsStates[id] = new BallState { Position = position, State = MotionState.Stationary };
@@ -118,46 +118,46 @@ public sealed class BilliardsEngine
     /// are zeroed and the motion state becomes <see cref="MotionState.Stationary"/>. Intended
     /// for host-driven game rules (cue-ball scratch respawn, foul re-spotting).
     /// </summary>
-    public void RespawnBall(int id, Vector3 position)
+    public void RespawnBall(int id, SnVector3 position)
     {
         ref BallState ball = ref _physicsStates[id];
         ball.Position = position;
-        ball.LinearVelocity = Vector3.Zero;
-        ball.AngularVelocity = Vector3.Zero;
+        ball.LinearVelocity = SnVector3.Zero;
+        ball.AngularVelocity = SnVector3.Zero;
         ball.State = MotionState.Stationary;
     }
 
     /// <summary>
     /// Strikes a ball with a cue stick, calculating off-center deflection (squirt) and spin.
     /// </summary>
-    public void StrikeCueBall(int id, in Vector3 aimDirection, float force, in Vector3 hitOffset)
+    public void StrikeCueBall(int id, in SnVector3 aimDirection, float force, in SnVector3 hitOffset)
     {
         ref BallState ball = ref _physicsStates[id];
 
-        Vector3 aimDir = Vector3.Normalize(aimDirection);
+        SnVector3 aimDir = SnVector3.Normalize(aimDirection);
 
         float maxOffset = Config.Ball.Radius * Config.Cue.MiscueLimit;
-        Vector3 safeOffset = hitOffset;
+        SnVector3 safeOffset = hitOffset;
         if (safeOffset.LengthSquared() > maxOffset * maxOffset)
         {
-            safeOffset = Vector3.Normalize(safeOffset) * maxOffset;
+            safeOffset = SnVector3.Normalize(safeOffset) * maxOffset;
         }
 
         // Squirt rotates the velocity vector away from the offset side; it does NOT add energy.
-        Vector3 offsetOnAimPlane = safeOffset - (Vector3.Dot(safeOffset, aimDir) * aimDir);
-        Vector3 finalDirection = aimDir;
+        SnVector3 offsetOnAimPlane = safeOffset - (SnVector3.Dot(safeOffset, aimDir) * aimDir);
+        SnVector3 finalDirection = aimDir;
 
         if (offsetOnAimPlane.LengthSquared() > 0.00001f)
         {
-            Vector3 squirtDirection = -Vector3.Normalize(offsetOnAimPlane);
+            SnVector3 squirtDirection = -SnVector3.Normalize(offsetOnAimPlane);
             float offsetRatio = offsetOnAimPlane.Length() / Config.Ball.Radius;
             float squirtAngle = offsetRatio * Config.Cue.DeflectionMultiplier;
-            finalDirection = Vector3.Normalize(
+            finalDirection = SnVector3.Normalize(
                 (aimDir * MathF.Cos(squirtAngle)) + (squirtDirection * MathF.Sin(squirtAngle)));
         }
 
-        Vector3 finalImpulse = finalDirection * force;
-        Vector3 torqueOffset = safeOffset * Config.Cue.SpinEfficiency;
+        SnVector3 finalImpulse = finalDirection * force;
+        SnVector3 torqueOffset = safeOffset * Config.Cue.SpinEfficiency;
 
         PhysicsMath.ApplyImpulse(ref ball, finalImpulse, torqueOffset, Config.Ball.Mass, Config.Ball.Radius);
 
@@ -304,16 +304,16 @@ public sealed class BilliardsEngine
             case EventType.BallCushionCollision:
             {
                 // Capture pre-impact normal speed for the event payload.
-                float impactSpeed = MathF.Abs(Vector3.Dot(ballA.LinearVelocity, TableLayout.Rails[e.CushionIndex].Normal));
+                float impactSpeed = MathF.Abs(SnVector3.Dot(ballA.LinearVelocity, TableLayout.Rails[e.CushionIndex].Normal));
                 TablePhysics.ResolveCushionCollision(ref ballA, in TableLayout.Rails[e.CushionIndex], in Config);
                 OnRailContact?.Invoke(e.BallA, e.CushionIndex, impactSpeed);
                 break;
             }
             case EventType.BallJawCornerCollision:
             {
-                Vector3 jaw = TableLayout.JawCorners[e.CushionIndex];
-                Vector3 normal = Vector3.Normalize(ballA.Position - jaw);
-                float impactSpeed = MathF.Abs(Vector3.Dot(ballA.LinearVelocity, normal));
+                SnVector3 jaw = TableLayout.JawCorners[e.CushionIndex];
+                SnVector3 normal = SnVector3.Normalize(ballA.Position - jaw);
+                float impactSpeed = MathF.Abs(SnVector3.Dot(ballA.LinearVelocity, normal));
                 TablePhysics.ResolveJawCornerCollision(ref ballA, jaw, in Config);
                 OnJawContact?.Invoke(e.BallA, e.CushionIndex, impactSpeed);
                 break;
@@ -326,10 +326,10 @@ public sealed class BilliardsEngine
 
     private void ResolvePocketed(int id, ref BallState ball)
     {
-        Vector3 dropPos = ball.Position;
+        SnVector3 dropPos = ball.Position;
 
-        ball.LinearVelocity = Vector3.Zero;
-        ball.AngularVelocity = Vector3.Zero;
+        ball.LinearVelocity = SnVector3.Zero;
+        ball.AngularVelocity = SnVector3.Zero;
         ball.State = MotionState.Pocketed;
 
         // Game rules (scratch, ball-in-hand, re-spotting the 8-ball, etc.) live in the host
@@ -337,7 +337,7 @@ public sealed class BilliardsEngine
         OnBallPocketed?.Invoke(id, dropPos);
     }
 
-    public Vector3 GetBallPosition(int id) => _physicsStates[id].Position;
+    public SnVector3 GetBallPosition(int id) => _physicsStates[id].Position;
 
     public bool AreAllBallsAsleep()
     {

@@ -1,5 +1,6 @@
 using System;
-using System.Numerics;
+using SnVector3 = System.Numerics.Vector3;
+using SnVector2 = System.Numerics.Vector2;
 
 namespace LongShot.Engine;
 
@@ -10,14 +11,14 @@ public static class TablePhysics
 {
     public static void ResolveCushionCollision(ref BallState ball, in CushionSegment segment, in PhysicsConfig config)
     {
-        float velocityAlongNormal = Vector3.Dot(ball.LinearVelocity, segment.Normal);
+        float velocityAlongNormal = SnVector3.Dot(ball.LinearVelocity, segment.Normal);
         if (velocityAlongNormal > 0)
         {
             return;
         }
 
         // Anti-clipping separation
-        float distToLine = Vector3.Dot(ball.Position - segment.Start, segment.Normal);
+        float distToLine = SnVector3.Dot(ball.Position - segment.Start, segment.Normal);
         float overlap = config.Ball.Radius - distToLine;
         if (overlap > 0)
         {
@@ -27,26 +28,26 @@ public static class TablePhysics
         float impactSpeed = -velocityAlongNormal;
         float restitution = PhysicsMath.CalculateDynamicRestitution(impactSpeed, config.Cushion.MaxRestitution, config.Cushion.MinRestitution, config.Cushion.SpeedDecay);
 
-        Vector3 impulseNormal = -(1 + restitution) * velocityAlongNormal * segment.Normal * config.Ball.Mass;
+        SnVector3 impulseNormal = -(1 + restitution) * velocityAlongNormal * segment.Normal * config.Ball.Mass;
         float impulseNormalMag = impulseNormal.Length();
 
-        Vector3 tangentDir = Vector3.Normalize(segment.End - segment.Start);
+        SnVector3 tangentDir = SnVector3.Normalize(segment.End - segment.Start);
 
         // Rail nose contact is above the ball centre; resolve the geometric offset.
         float hOffset = config.Cushion.NoseHeight - config.Ball.Radius;
         float hOffsetClamped = Math.Clamp(hOffset, -config.Ball.Radius, config.Ball.Radius);
         float horizontalOffset = MathF.Sqrt((config.Ball.Radius * config.Ball.Radius) - (hOffsetClamped * hOffsetClamped));
-        Vector3 contactVector = (-segment.Normal * horizontalOffset) + (Vector3.UnitY * hOffsetClamped);
+        SnVector3 contactVector = (-segment.Normal * horizontalOffset) + (SnVector3.UnitY * hOffsetClamped);
 
-        Vector3 surfaceVel = PhysicsMath.GetSurfaceVelocity(ball.LinearVelocity, ball.AngularVelocity, contactVector);
+        SnVector3 surfaceVel = PhysicsMath.GetSurfaceVelocity(ball.LinearVelocity, ball.AngularVelocity, contactVector);
 
-        float slipSpeed = Vector3.Dot(surfaceVel, tangentDir);
+        float slipSpeed = SnVector3.Dot(surfaceVel, tangentDir);
         float verticalSlipSpeed = surfaceVel.Y;
 
-        Vector2 slip2D = new Vector2(slipSpeed, verticalSlipSpeed);
+        SnVector2 slip2D = new SnVector2(slipSpeed, verticalSlipSpeed);
         float totalSlipMag = slip2D.Length();
 
-        Vector3 frictionImpulse = Vector3.Zero;
+        SnVector3 frictionImpulse = SnVector3.Zero;
         if (totalSlipMag > 0.0001f)
         {
             float maxFriction = impulseNormalMag * config.Cushion.FrictionCoeff;
@@ -54,11 +55,11 @@ public static class TablePhysics
             float requiredFriction = totalSlipMag * effectiveMass;
 
             float appliedFrictionMag = MathF.Min(requiredFriction, maxFriction);
-            Vector2 appliedFriction2D = -(slip2D / totalSlipMag) * appliedFrictionMag;
+            SnVector2 appliedFriction2D = -(slip2D / totalSlipMag) * appliedFrictionMag;
 
             // Dampen the vertical friction component to stop backspin from violently grabbing the rail.
             frictionImpulse = (tangentDir * appliedFriction2D.X) +
-                              (Vector3.UnitY * (appliedFriction2D.Y * config.Cushion.VerticalFrictionMultiplier));
+                              (SnVector3.UnitY * (appliedFriction2D.Y * config.Cushion.VerticalFrictionMultiplier));
         }
 
         // Rubber rail compression bleeds angular momentum on every axis, not only side-spin (Y).
@@ -73,17 +74,17 @@ public static class TablePhysics
         ball.State = MotionState.Sliding;
     }
 
-    public static void ResolveJawCornerCollision(ref BallState ball, Vector3 cornerPoint, in PhysicsConfig config)
+    public static void ResolveJawCornerCollision(ref BallState ball, SnVector3 cornerPoint, in PhysicsConfig config)
     {
-        Vector3 normal = Vector3.Normalize(ball.Position - cornerPoint);
-        float velocityAlongNormal = Vector3.Dot(ball.LinearVelocity, normal);
+        SnVector3 normal = SnVector3.Normalize(ball.Position - cornerPoint);
+        float velocityAlongNormal = SnVector3.Dot(ball.LinearVelocity, normal);
 
         if (velocityAlongNormal > 0)
         {
             return;
         }
 
-        float dist = Vector3.Distance(ball.Position, cornerPoint);
+        float dist = SnVector3.Distance(ball.Position, cornerPoint);
         float overlap = config.Ball.Radius - dist;
         if (overlap > 0)
         {
@@ -93,16 +94,16 @@ public static class TablePhysics
         float impactSpeed = -velocityAlongNormal;
         float restitution = PhysicsMath.CalculateDynamicRestitution(impactSpeed, config.Cushion.MaxRestitution, config.Cushion.MinRestitution, config.Cushion.SpeedDecay);
 
-        Vector3 impulseNormal = -(1 + restitution) * velocityAlongNormal * normal * config.Ball.Mass;
+        SnVector3 impulseNormal = -(1 + restitution) * velocityAlongNormal * normal * config.Ball.Mass;
 
-        Vector3 contactVector = -normal * config.Ball.Radius;
-        Vector3 surfaceVel = PhysicsMath.GetSurfaceVelocity(ball.LinearVelocity, ball.AngularVelocity, contactVector);
-        Vector3 tangent = surfaceVel - (Vector3.Dot(surfaceVel, normal) * normal);
+        SnVector3 contactVector = -normal * config.Ball.Radius;
+        SnVector3 surfaceVel = PhysicsMath.GetSurfaceVelocity(ball.LinearVelocity, ball.AngularVelocity, contactVector);
+        SnVector3 tangent = surfaceVel - (SnVector3.Dot(surfaceVel, normal) * normal);
 
-        Vector3 frictionImpulse = Vector3.Zero;
+        SnVector3 frictionImpulse = SnVector3.Zero;
         if (tangent.LengthSquared() > 0.0001f)
         {
-            Vector3 tangentDir = Vector3.Normalize(tangent);
+            SnVector3 tangentDir = SnVector3.Normalize(tangent);
             float maxFriction = impulseNormal.Length() * config.Cushion.FrictionCoeff;
             float effectiveMass = PhysicsMath.SingleSphereContactMass(config.Ball.Mass);
 
@@ -115,19 +116,19 @@ public static class TablePhysics
 
     public static void ResolveBallBallCollision(ref BallState a, ref BallState b, in PhysicsConfig config)
     {
-        Vector3 normal = Vector3.Normalize(b.Position - a.Position);
-        Vector3 relVel = b.LinearVelocity - a.LinearVelocity;
-        float velAlongNormal = Vector3.Dot(relVel, normal);
+        SnVector3 normal = SnVector3.Normalize(b.Position - a.Position);
+        SnVector3 relVel = b.LinearVelocity - a.LinearVelocity;
+        float velAlongNormal = SnVector3.Dot(relVel, normal);
 
         if (velAlongNormal > 0)
         {
             return;
         }
 
-        float overlap = (config.Ball.Radius * 2.0f) - Vector3.Distance(a.Position, b.Position);
+        float overlap = (config.Ball.Radius * 2.0f) - SnVector3.Distance(a.Position, b.Position);
         if (overlap > 0)
         {
-            Vector3 separation = normal * (overlap * 0.501f);
+            SnVector3 separation = normal * (overlap * 0.501f);
             a.Position -= separation;
             b.Position += separation;
         }
@@ -137,28 +138,28 @@ public static class TablePhysics
             impactSpeed, config.Ball.MaxRestitution, config.Ball.MinRestitution, config.Ball.RestitutionDecay);
 
         float impulseMagnitude = -(1 + restitution) * velAlongNormal / ((1 / config.Ball.Mass) + (1 / config.Ball.Mass));
-        Vector3 impulseNormal = impulseMagnitude * normal;
+        SnVector3 impulseNormal = impulseMagnitude * normal;
 
         a.LinearVelocity -= impulseNormal / config.Ball.Mass;
         b.LinearVelocity += impulseNormal / config.Ball.Mass;
 
-        Vector3 rA = normal * config.Ball.Radius;
-        Vector3 rB = -normal * config.Ball.Radius;
+        SnVector3 rA = normal * config.Ball.Radius;
+        SnVector3 rB = -normal * config.Ball.Radius;
 
-        Vector3 surfVelA = PhysicsMath.GetSurfaceVelocity(a.LinearVelocity, a.AngularVelocity, rA);
-        Vector3 surfVelB = PhysicsMath.GetSurfaceVelocity(b.LinearVelocity, b.AngularVelocity, rB);
+        SnVector3 surfVelA = PhysicsMath.GetSurfaceVelocity(a.LinearVelocity, a.AngularVelocity, rA);
+        SnVector3 surfVelB = PhysicsMath.GetSurfaceVelocity(b.LinearVelocity, b.AngularVelocity, rB);
 
-        Vector3 relSurfVel = surfVelA - surfVelB;
-        Vector3 tangent = relSurfVel - (Vector3.Dot(relSurfVel, normal) * normal);
+        SnVector3 relSurfVel = surfVelA - surfVelB;
+        SnVector3 tangent = relSurfVel - (SnVector3.Dot(relSurfVel, normal) * normal);
 
         if (tangent.LengthSquared() > 0.0001f)
         {
-            Vector3 tangentDir = Vector3.Normalize(tangent);
+            SnVector3 tangentDir = SnVector3.Normalize(tangent);
             float maxFriction = impulseMagnitude * config.Ball.Friction;
             float effectiveMass = PhysicsMath.TwoSphereContactMass(config.Ball.Mass);
 
             float appliedFriction = MathF.Min(tangent.Length() * effectiveMass, maxFriction);
-            Vector3 frictionImpulse = tangentDir * appliedFriction;
+            SnVector3 frictionImpulse = tangentDir * appliedFriction;
 
             PhysicsMath.ApplyImpulse(ref a, -frictionImpulse, rA, config.Ball.Mass, config.Ball.Radius);
             PhysicsMath.ApplyImpulse(ref b, frictionImpulse, rB, config.Ball.Mass, config.Ball.Radius);
@@ -237,9 +238,9 @@ public static class TablePhysics
             ball.AngularVelocity.Y = currentY;
         }
 
-        Vector3 contactVector = new Vector3(0, -config.Ball.Radius, 0);
-        Vector3 surfaceVelocity = PhysicsMath.GetSurfaceVelocity(ball.LinearVelocity, ball.AngularVelocity, contactVector);
-        Vector3 slip = new(surfaceVelocity.X, 0, surfaceVelocity.Z);
+        SnVector3 contactVector = new SnVector3(0, -config.Ball.Radius, 0);
+        SnVector3 surfaceVelocity = PhysicsMath.GetSurfaceVelocity(ball.LinearVelocity, ball.AngularVelocity, contactVector);
+        SnVector3 slip = new(surfaceVelocity.X, 0, surfaceVelocity.Z);
         float slipMag = slip.Length();
 
         if (ball.State == MotionState.Sliding || slipMag > 0.0001f)
@@ -254,14 +255,14 @@ public static class TablePhysics
         ApplySleep(ref ball, in config);
     }
 
-    private static void ApplySliding(ref BallState ball, Vector3 slip, float slipMag, float dt, in PhysicsConfig config)
+    private static void ApplySliding(ref BallState ball, SnVector3 slip, float slipMag, float dt, in PhysicsConfig config)
     {
         // Damp X/Z spin proportional to slip (the contact patch can't support infinite point spin).
         float patchDrag = config.Cloth.ContactPatchDrag * slipMag * dt;
         ball.AngularVelocity.X *= MathF.Exp(-patchDrag);
         ball.AngularVelocity.Z *= MathF.Exp(-patchDrag);
 
-        Vector3 dir = slipMag > 0.000001f ? -slip / slipMag : Vector3.Zero;
+        SnVector3 dir = slipMag > 0.000001f ? -slip / slipMag : SnVector3.Zero;
 
         // "Nap bunching" - nap direction modulates effective sliding friction with slip speed.
         float dynamicFriction = config.Cloth.SlidingFriction * (1.0f + (slipMag * config.Cloth.NapBunchingFactor));
@@ -276,13 +277,13 @@ public static class TablePhysics
             // The ball finishes sliding during this frame. Apply sliding friction for exactly
             // the fraction required, then snap to pure rolling and apply rolling friction for the rest.
             float exactSlidingFriction = dynamicFriction * timeToRoll;
-            Vector3 impulse = dir * exactSlidingFriction * config.Ball.Mass;
-            Vector3 contactVector = new Vector3(0, -config.Ball.Radius, 0);
+            SnVector3 impulse = dir * exactSlidingFriction * config.Ball.Mass;
+            SnVector3 contactVector = new SnVector3(0, -config.Ball.Radius, 0);
 
             PhysicsMath.ApplyImpulse(ref ball, impulse, contactVector, config.Ball.Mass, config.Ball.Radius);
 
             // Force the rotational velocity to perfectly match the linear velocity to prevent floating-point drift.
-            ball.AngularVelocity = new Vector3(
+            ball.AngularVelocity = new SnVector3(
                 ball.LinearVelocity.Z / config.Ball.Radius,
                 ball.AngularVelocity.Y,
                 -ball.LinearVelocity.X / config.Ball.Radius
@@ -299,35 +300,35 @@ public static class TablePhysics
         else
         {
             float appliedFriction = dynamicFriction * dt;
-            Vector3 impulse = dir * appliedFriction * config.Ball.Mass;
-            Vector3 contactVector = new Vector3(0, -config.Ball.Radius, 0);
+            SnVector3 impulse = dir * appliedFriction * config.Ball.Mass;
+            SnVector3 contactVector = new SnVector3(0, -config.Ball.Radius, 0);
 
             PhysicsMath.ApplyImpulse(ref ball, impulse, contactVector, config.Ball.Mass, config.Ball.Radius);
 
             // Apply swerve only if sliding for the whole frame (vertical spin curves trajectory).
-            Vector2 horizVel = new Vector2(ball.LinearVelocity.X, ball.LinearVelocity.Z);
+            SnVector2 horizVel = new SnVector2(ball.LinearVelocity.X, ball.LinearVelocity.Z);
             if (MathF.Abs(ball.AngularVelocity.Y) > 0.05f && horizVel.LengthSquared() > 0.0001f)
             {
-                Vector3 moveDir = Vector3.Normalize(new Vector3(horizVel.X, 0, horizVel.Y));
-                Vector3 swerveDir = Vector3.Cross(moveDir, Vector3.UnitY);
+                SnVector3 moveDir = SnVector3.Normalize(new SnVector3(horizVel.X, 0, horizVel.Y));
+                SnVector3 swerveDir = SnVector3.Cross(moveDir, SnVector3.UnitY);
 
                 float spinSurfaceSpeed = ball.AngularVelocity.Y * config.Ball.Radius;
-                Vector3 swerveDeltaV = swerveDir * spinSurfaceSpeed * config.Cloth.SwerveFactor * dt;
+                SnVector3 swerveDeltaV = swerveDir * spinSurfaceSpeed * config.Cloth.SwerveFactor * dt;
 
-                PhysicsMath.ApplyImpulse(ref ball, swerveDeltaV * config.Ball.Mass, Vector3.Zero, config.Ball.Mass, config.Ball.Radius);
+                PhysicsMath.ApplyImpulse(ref ball, swerveDeltaV * config.Ball.Mass, SnVector3.Zero, config.Ball.Mass, config.Ball.Radius);
             }
         }
     }
 
     private static void ApplyRolling(ref BallState ball, float dt, in PhysicsConfig config)
     {
-        Vector2 horizVel = new Vector2(ball.LinearVelocity.X, ball.LinearVelocity.Z);
+        SnVector2 horizVel = new SnVector2(ball.LinearVelocity.X, ball.LinearVelocity.Z);
         float speed = horizVel.Length();
 
         if (speed < config.Env.LinearSleepSpeed)
         {
-            ball.LinearVelocity = new Vector3(0, ball.LinearVelocity.Y, 0);
-            ball.AngularVelocity = new Vector3(0, ball.AngularVelocity.Y, 0);
+            ball.LinearVelocity = new SnVector3(0, ball.LinearVelocity.Y, 0);
+            ball.AngularVelocity = new SnVector3(0, ball.AngularVelocity.Y, 0);
             return;
         }
 
@@ -337,19 +338,19 @@ public static class TablePhysics
 
         float effectiveFriction = config.Cloth.RollingFriction + napResistance;
 
-        Vector2 decel2D = horizVel / speed * effectiveFriction * dt;
-        Vector3 decel = new Vector3(decel2D.X, 0, decel2D.Y);
+        SnVector2 decel2D = horizVel / speed * effectiveFriction * dt;
+        SnVector3 decel = new SnVector3(decel2D.X, 0, decel2D.Y);
 
         if (decel.LengthSquared() >= horizVel.LengthSquared())
         {
-            ball.LinearVelocity = new Vector3(0, ball.LinearVelocity.Y, 0);
+            ball.LinearVelocity = new SnVector3(0, ball.LinearVelocity.Y, 0);
         }
         else
         {
             ball.LinearVelocity -= decel;
         }
 
-        ball.AngularVelocity = new Vector3(
+        ball.AngularVelocity = new SnVector3(
             ball.LinearVelocity.Z / config.Ball.Radius,
             ball.AngularVelocity.Y,
             -ball.LinearVelocity.X / config.Ball.Radius
@@ -360,13 +361,13 @@ public static class TablePhysics
 
     private static void ApplySleep(ref BallState ball, in PhysicsConfig config)
     {
-        Vector2 horizVel = new Vector2(ball.LinearVelocity.X, ball.LinearVelocity.Z);
+        SnVector2 horizVel = new SnVector2(ball.LinearVelocity.X, ball.LinearVelocity.Z);
 
         if (horizVel.LengthSquared() < config.Env.LinearSleepSpeed * config.Env.LinearSleepSpeed &&
             MathF.Abs(ball.AngularVelocity.Y) < config.Env.AngularSleepSpeed)
         {
-            ball.LinearVelocity = Vector3.Zero;
-            ball.AngularVelocity = Vector3.Zero;
+            ball.LinearVelocity = SnVector3.Zero;
+            ball.AngularVelocity = SnVector3.Zero;
             ball.State = MotionState.Stationary;
         }
     }

@@ -1,5 +1,5 @@
 using System;
-using System.Numerics;
+using SnVector3 = System.Numerics.Vector3;
 
 namespace LongShot.Engine;
 
@@ -23,8 +23,8 @@ public static class PhysicsMath
     public static float TwoSphereContactMass(float mass) => mass * (1f / 7f);
 
     /// <summary>V_surface = V_linear + (Omega × R_contact)</summary>
-    public static Vector3 GetSurfaceVelocity(Vector3 linearVel, Vector3 angularVel, Vector3 contactVector) =>
-        linearVel + Vector3.Cross(angularVel, contactVector);
+    public static SnVector3 GetSurfaceVelocity(SnVector3 linearVel, SnVector3 angularVel, SnVector3 contactVector) =>
+        linearVel + SnVector3.Cross(angularVel, contactVector);
 
     /// <summary>
     /// Dynamic restitution: materials absorb more energy at higher impact speeds.
@@ -36,11 +36,11 @@ public static class PhysicsMath
     /// <summary>
     /// Applies an impulse at a specific contact point, mutating both linear and angular velocity.
     /// </summary>
-    public static void ApplyImpulse(ref BallState ball, Vector3 impulse, Vector3 contactVector, float mass, float radius)
+    public static void ApplyImpulse(ref BallState ball, SnVector3 impulse, SnVector3 contactVector, float mass, float radius)
     {
         ball.LinearVelocity += impulse / mass;
         float inertia = GetInertia(mass, radius);
-        Vector3 angularImpulse = Vector3.Cross(contactVector, impulse);
+        SnVector3 angularImpulse = SnVector3.Cross(contactVector, impulse);
         ball.AngularVelocity += angularImpulse / inertia;
     }
 }

@@ -1,4 +1,4 @@
-using System.Numerics;
+using SnVector3 = System.Numerics.Vector3;
 
 namespace LongShot.Engine;
 
@@ -8,7 +8,7 @@ namespace LongShot.Engine;
 /// along the table length (foot rail at +Z, head rail at -Z).
 ///
 /// Source 2 / s&amp;box is <b>Z-up, right-handed</b>: +X forward, +Y left, +Z up. When the
-/// engine drops into s&amp;box, every Vector3 crossing the boundary needs the swap below.
+/// engine drops into s&amp;box, every SnVector3 crossing the boundary needs the swap below.
 /// Keep all axis-convention knowledge in this one file so the port is a single grep target.
 /// </summary>
 public static class MathExtensions
@@ -21,12 +21,12 @@ public static class MathExtensions
     ///   <item>engine.Z (forward) → s&amp;box.X (forward)</item>
     /// </list>
     /// </summary>
-    public static Vector3 ToZUp(Vector3 yUp) => new(yUp.Z, -yUp.X, yUp.Y);
+    public static SnVector3 ToZUp(SnVector3 yUp) => new(yUp.Z, -yUp.X, yUp.Y);
 
     /// <summary>
     /// s&amp;box (Z-up) → engine (Y-up). Inverse of <see cref="ToZUp"/>.
     /// </summary>
-    public static Vector3 FromZUp(Vector3 zUp) => new(-zUp.Y, zUp.Z, zUp.X);
+    public static SnVector3 FromZUp(SnVector3 zUp) => new(-zUp.Y, zUp.Z, zUp.X);
 
     /// <summary>
     /// Apply the Y-up → Z-up swap to every ball state in place. Use only at the engine /

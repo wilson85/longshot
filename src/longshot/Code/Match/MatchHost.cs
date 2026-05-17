@@ -41,32 +41,11 @@ public sealed class MatchHost : Component
     [Property] public bool SpawnTableVisuals { get; set; } = true;
 
     /// <summary>
-    /// Box-shaped model used for slate / rails / pockets when no specific model is assigned. Defaults to
-    /// <c>models/vidya/cube_white_64.vmdl</c> (mounted via <c>vidya.model-cube64</c>) so visuals work
-    /// out of the box. Swap for a nicer mesh once the geometry is verified.
+    /// Native size of <c>models/dev/sphere.vmdl</c> in s&amp;box units. The core dev sphere is 50u across,
+    /// so its <c>LocalScale</c> must be divided by 50 to render at a requested diameter (in units).
+    /// Hard-coded as a constant — the dev sphere is the canonical fallback and isn't user-swappable.
     /// </summary>
-    [Property] public Model BoxModel { get; set; }
-
-    /// <summary>
-    /// Sphere model used for procedurally-spawned balls when <see cref="BallPrefab"/> is null.
-    /// Defaults to <c>models/vidya/sphere_white_64.vmdl</c> (mounted via <c>vidya.model-sphere64</c>).
-    /// </summary>
-    [Property] public Model SphereModel { get; set; }
-
-    /// <summary>
-    /// Native size of the box mesh assigned to <see cref="BoxModel"/>, in s&amp;box units. The default
-    /// fallback <c>models/dev/box.vmdl</c> is 50 units cubed. Every slate/rail/pocket <c>LocalScale</c>
-    /// is divided by this so the rendered size matches the requested dimensions in units. Set to 1 if
-    /// you assign a 1×1×1 cube.
-    /// </summary>
-    [Property] public float BoxModelNativeSize { get; set; } = 50f;
-
-    /// <summary>
-    /// Native size of the sphere mesh assigned to <see cref="SphereModel"/>, in s&amp;box units. The
-    /// default fallback <c>models/dev/sphere.vmdl</c> is 50 units across. Used to scale procedurally-
-    /// spawned balls when no <see cref="BallPrefab"/> is assigned.
-    /// </summary>
-    [Property] public float SphereModelNativeSize { get; set; } = 50f;
+    private const float DevSphereNativeSize = 50f;
 
     /// <summary>Tint applied to the slate ModelRenderer. Default: classic billiard green.</summary>
     [Property] public Color SlateColor { get; set; } = new Color(0.04f, 0.40f, 0.27f);
@@ -126,7 +105,9 @@ public sealed class MatchHost : Component
         _engine.AddBall(new SnVec3(0, GameSettings.BallRadius,  0.8f), BallType.Normal);
 
         float diameterUnits = Conversions.MetresToUnits(GameSettings.BallRadius * 2f);
-        var sphereFallback = SphereModel ?? Model.Load("models/dev/sphere.vmdl");
+        // Core dev sphere is a local asset and works at runtime (unlike mounted cloud .vmdl assets).
+        // For artist-authored balls, assign a BallPrefab in the inspector instead.
+        var sphereFallback = Model.Load("models/dev/sphere.vmdl");
 
         for (int i = 0; i < _engine.ActiveBallCount; i++)
         {
@@ -140,11 +121,10 @@ public sealed class MatchHost : Component
             }
             else if (sphereFallback is not null)
             {
-                // Procedural fallback: spawn a ModelRenderer'd sphere. The mounted sphere is 64u
-                // native, so we scale to match the ball diameter.
+                // Procedural fallback: spawn a ModelRenderer'd sphere. The dev sphere is 50u native.
                 go = Scene.CreateObject(true);
                 go.Name = $"Ball_{i}";
-                float ballScale = diameterUnits / MathF.Max(0.0001f, SphereModelNativeSize);
+                float ballScale = diameterUnits / DevSphereNativeSize;
                 go.LocalScale = new Vector3(ballScale, ballScale, ballScale);
                 var mr = go.AddComponent<ModelRenderer>();
                 mr.Model = sphereFallback;
@@ -152,7 +132,7 @@ public sealed class MatchHost : Component
             }
             else
             {
-                Log.Warning($"{nameof(MatchHost)}: BallPrefab is null AND fallback sphere model ('models/vidya/sphere_white_64.vmdl') could not be loaded. Ball #{i} will not be visible.");
+                Log.Warning($"{nameof(MatchHost)}: BallPrefab is null AND 'models/dev/sphere.vmdl' could not be loaded. Ball #{i} will not be visible.");
                 continue;
             }
             _ballObjects.Add(go);
@@ -210,29 +190,22 @@ public sealed class MatchHost : Component
     }
 
     /// <summary>
-    /// Procedurally spawns slate / rails / pockets from the engine's collision primitives. Box meshes only
-    /// (so first-light visuals match the physics 1:1); replace with authored models once the layout is verified.
+    /// Procedurally spawns slate / rails / pockets from the engine's collision primitives. Each piece is
+    /// built as a runtime <see cref="Model"/> via <see cref="ProceduralMeshes.BuildBox"/> — no .vmdl assets
+    /// involved. This avoids the cloud-asset rendering bug entirely (mounted cloud .vmdl assets silently
+    /// fail to bind at runtime; see <c>.claude/skills/sbox-runtime-rendering/SKILL.md</c>) and also means
+    /// every box is sized in exact playfield units, no native-size scaling math.
     ///
-    /// All spawned GameObjects are parented under <c>this.GameObject</c> so they move with the host and so
-    /// scene-inspection tools can see them as a tidy group.
+    /// All spawned GameObjects sit at the scene root. Parenting under <see cref="Component.GameObject"/>
+    /// is fine if you want a tidy hierarchy — kept flat for now so the inspector lists them at the top.
     /// </summary>
     private void BuildTableVisuals(TableDefinition def, CushionSegment[] rails, PocketBeam[] pockets)
     {
-        // Use the built-in core dev box. Path 'models/dev/box.vmdl' lives in <sbox-install>/core/models/dev/
-        // and renders correctly at runtime. Mounted CLOUD assets (e.g. vidya.model-cube64) do NOT render
-        // when assigned at runtime via Model.Load or Cloud.Model — they only work when assigned in edit
-        // mode (as a serialized scene reference). The core primitives ship with s&box and always work.
-        var boxModel = BoxModel ?? Model.Load("models/dev/box.vmdl");
-        if (boxModel is null)
-        {
-            Log.Warning($"{nameof(MatchHost)}: BoxModel is null and 'models/dev/box.vmdl' could not be loaded — table visuals will be invisible. Assign a box-shaped Model in the inspector.");
-            return;
-        }
-
-        // Scaling: every cube/box model has a "native size" (the dimensions of the unscaled mesh).
-        // The default cube_white_64 is 64 units cubed, so a LocalScale of 1 renders a 64-unit cube.
-        // To render a 100-unit-wide slate from a 64-native cube we need scale = 100/64 ≈ 1.5625.
-        float boxN = MathF.Max(0.0001f, BoxModelNativeSize);
+        // Single shared material for every table piece. Material.Load returns a real PBR vmat that
+        // ModelRenderer.Tint multiplies cleanly; Material.Create("name", "shader") would produce a
+        // magenta-checker missing-texture placeholder instead. Each call to BuildBox makes a *new*
+        // Sandbox.Mesh bound to this material, which is fine — the material itself is reused.
+        var material = Material.Load("materials/default.vmat");
 
         // Visual rails come from the source RailData (6 long bodies), NOT from the post-built
         // CushionSegment[] which subdivides each corner into a fillet arc (300+ tiny segments).
@@ -240,48 +213,68 @@ public sealed class MatchHost : Component
 
         // --- Slate: a thin flat box covering the entire playfield, with its top face at world Z = 0. ---
         {
-            var slate = Scene.CreateObject(true);
-            slate.Name = "TableSlate";
-            // Top-level scene objects (no parenting). Parenting under Match was suspected to break
-            // rendering but the real bug was mounted cloud assets at runtime. With models/dev/box.vmdl
-            // parenting works fine if you want a tidy hierarchy — revisit if needed.
             float widthUnits  = Conversions.MetresToUnits(def.Width);   // engine X  → sbox Y span
             float lengthUnits = Conversions.MetresToUnits(def.Length);  // engine Z  → sbox X span
+
+            var slateModel = ProceduralMeshes.BuildBox(
+                new Vector3(lengthUnits * 0.5f, widthUnits * 0.5f, SlateThicknessUnits * 0.5f),
+                material);
+
+            var slate = Scene.CreateObject(true);
+            slate.Name = "TableSlate";
             slate.WorldPosition = new Vector3(0f, 0f, -SlateThicknessUnits * 0.5f);
-            slate.LocalScale    = new Vector3(lengthUnits / boxN, widthUnits / boxN, SlateThicknessUnits / boxN);
+            // LocalScale stays at (1,1,1) — the mesh is already built at the right size.
             var mr = slate.AddComponent<ModelRenderer>();
-            mr.Model = boxModel;
+            mr.Model = slateModel;
             mr.Tint  = SlateColor;
             _tableObjects.Add(slate);
         }
 
-        // --- Rails: one box per source RailData (6 total), oriented along the rail direction, sitting on the slate. ---
+        // --- Rails: one hexagonal-with-jaws prism per source RailData (6 total). ---
+        // The local 2D outline comes from TableBuilder.BuildRailVisualOutline, which shares geometry
+        // with the physics layer (BuildRailPhysics) — the rendered rail edge therefore matches the
+        // cushion collision boundary exactly. The outline has a straight back edge (table boundary)
+        // and a shorter playfield-facing edge with chamfered, filleted jaw cutouts at each end.
         for (int i = 0; i < visualRails.Count; i++)
         {
             var rd = visualRails[i];
 
-            // RailData stores 2D positions: (engine.X, engine.Z) with engine.Y = 0 implied.
-            // Build 3D engine vectors at slate height.
+            // Outline points are in rail-local 2D, metres. Local axes:
+            //   x = along-rail length (-halfLen .. +halfLen)
+            //   y = perpendicular  (-halfWid = back/table-boundary, +halfWid = playfield-facing)
+            var (outlineMetres, worldMidEngine, _) = TableBuilder.BuildRailVisualOutline(rd);
+
+            // Convert outline to s&box units. Local x/y stay axis-aligned with the mesh's local X/Y;
+            // the yaw rotation below rotates the whole mesh around s&box +Z to align with the world rail.
+            var outlineUnits = new List<Vector2>(outlineMetres.Count);
+            for (int k = 0; k < outlineMetres.Count; k++)
+            {
+                outlineUnits.Add(new Vector2(
+                    Conversions.MetresToUnits(outlineMetres[k].X),
+                    Conversions.MetresToUnits(outlineMetres[k].Y)));
+            }
+
+            // Yaw: derived from the rail direction in world space (consistent with the previous box-rail
+            // placement). We deliberately don't use the engine-frame yaw returned by BuildRailVisualOutline
+            // — the Y-up → Z-up axis swap means the world-frame angle is what s&box needs.
             var startEngine = new SnVec3(rd.Start.X, 0f, rd.Start.Y);
             var endEngine   = new SnVec3(rd.End.X,   0f, rd.End.Y);
-
-            SnVec3 midEngine  = (startEngine + endEngine) * 0.5f;
-            SnVec3 diffEngine = endEngine - startEngine;
-            float lengthUnits = Conversions.MetresToUnits(diffEngine.Length());
-
-            Vector3 midWorld = Conversions.EngineToWorld(midEngine);
-            Vector3 dirWorld = Conversions.EngineToWorld(diffEngine);
+            Vector3 midWorld = Conversions.EngineToWorld(worldMidEngine);
+            Vector3 dirWorld = Conversions.EngineToWorld(endEngine - startEngine);
             float yawDeg = MathF.Atan2(dirWorld.y, dirWorld.x) * (180f / MathF.PI);
+
+            // Extrude vertically. The prism spans Z ∈ [-halfHeight, +halfHeight] in its own local
+            // frame; placing the GameObject at z = halfHeight puts the bottom face flush with the slate.
+            float halfHeight = RailHeightUnits * 0.5f;
+            var railModel = ProceduralMeshes.BuildPrism(outlineUnits, halfHeight, material);
 
             var rail = Scene.CreateObject(true);
             rail.Name = $"Rail_{i}_{rd.Name}";
-            rail.WorldPosition = new Vector3(midWorld.x, midWorld.y, RailHeightUnits * 0.5f);
+            rail.WorldPosition = new Vector3(midWorld.x, midWorld.y, halfHeight);
             rail.WorldRotation = Rotation.FromYaw(yawDeg);
-            // After yaw rotation: X = length axis, Y = thickness (toward playfield), Z = height (up).
-            rail.LocalScale    = new Vector3(lengthUnits / boxN, RailThicknessUnits / boxN, RailHeightUnits / boxN);
 
             var mr = rail.AddComponent<ModelRenderer>();
-            mr.Model = boxModel;
+            mr.Model = railModel;
             mr.Tint  = RailColor;
             _tableObjects.Add(rail);
         }
@@ -296,19 +289,24 @@ public sealed class MatchHost : Component
 
             Vector3 midWorld = Conversions.EngineToWorld(midEngine);
 
+            float halfGate = gateLengthUnits * 0.5f;
+            float halfDepth = SlateThicknessUnits * 0.55f;
+            var pocketModel = ProceduralMeshes.BuildBox(
+                new Vector3(halfGate, halfGate, halfDepth),
+                material);
+
             var pocket = Scene.CreateObject(true);
             pocket.Name = $"Pocket_{i}";
             // Sink below the slate top so the dark cube reads as a hole.
             pocket.WorldPosition = new Vector3(midWorld.x, midWorld.y, -SlateThicknessUnits * 0.25f);
-            pocket.LocalScale    = new Vector3(gateLengthUnits / boxN, gateLengthUnits / boxN, (SlateThicknessUnits * 1.1f) / boxN);
 
             var mr = pocket.AddComponent<ModelRenderer>();
-            mr.Model = boxModel;
+            mr.Model = pocketModel;
             mr.Tint  = PocketColor;
             _tableObjects.Add(pocket);
         }
 
-        Log.Info($"{nameof(MatchHost)}.BuildTableVisuals: spawned {_tableObjects.Count} table GameObjects under {GameObject.Name}.");
+        Log.Info($"{nameof(MatchHost)}.BuildTableVisuals: spawned {_tableObjects.Count} procedurally-built table GameObjects.");
     }
 
     /// <summary>

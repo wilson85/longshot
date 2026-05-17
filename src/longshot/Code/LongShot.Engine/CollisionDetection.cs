@@ -1,5 +1,5 @@
 using System;
-using System.Numerics;
+using SnVector3 = System.Numerics.Vector3;
 
 namespace LongShot.Engine;
 
@@ -7,13 +7,13 @@ public static class CollisionDetection
 {
     public static float CalculateBallSegmentImpactTime(in BallState ball, in CushionSegment segment)
     {
-        float velocityTowardsNormal = Vector3.Dot(ball.LinearVelocity, segment.Normal);
+        float velocityTowardsNormal = SnVector3.Dot(ball.LinearVelocity, segment.Normal);
         if (velocityTowardsNormal >= 0)
         {
             return float.PositiveInfinity;
         }
 
-        float distToLine = Vector3.Dot(ball.Position - segment.Start, segment.Normal);
+        float distToLine = SnVector3.Dot(ball.Position - segment.Start, segment.Normal);
 
         // Ball must be on the +normal side of the rail to participate in cushion physics.
         // Negative distToLine means the ball is "behind" the rail, which only happens for
@@ -26,9 +26,9 @@ public static class CollisionDetection
 
         if (distToLine <= GameSettings.BallRadius)
         {
-            Vector3 cp = ball.Position - (segment.Normal * distToLine);
-            Vector3 eDir = segment.End - segment.Start;
-            float d = Vector3.Dot(cp - segment.Start, eDir);
+            SnVector3 cp = ball.Position - (segment.Normal * distToLine);
+            SnVector3 eDir = segment.End - segment.Start;
+            float d = SnVector3.Dot(cp - segment.Start, eDir);
             if (d >= 0 && d <= eDir.LengthSquared())
             {
                 return 0f;
@@ -41,11 +41,11 @@ public static class CollisionDetection
             return float.PositiveInfinity;
         }
 
-        Vector3 impactPos = ball.Position + (ball.LinearVelocity * timeToLine);
-        Vector3 contactPoint = impactPos - (segment.Normal * GameSettings.BallRadius);
+        SnVector3 impactPos = ball.Position + (ball.LinearVelocity * timeToLine);
+        SnVector3 contactPoint = impactPos - (segment.Normal * GameSettings.BallRadius);
 
-        Vector3 edgeDir = segment.End - segment.Start;
-        float dot = Vector3.Dot(contactPoint - segment.Start, edgeDir);
+        SnVector3 edgeDir = segment.End - segment.Start;
+        float dot = SnVector3.Dot(contactPoint - segment.Start, edgeDir);
 
         if (dot >= 0 && dot <= edgeDir.LengthSquared())
         {
@@ -55,18 +55,18 @@ public static class CollisionDetection
         return float.PositiveInfinity;
     }
 
-    public static float CalculateBallPointImpactTime(in BallState ball, Vector3 point)
+    public static float CalculateBallPointImpactTime(in BallState ball, SnVector3 point)
     {
-        Vector3 deltaP = ball.Position - point;
-        Vector3 deltaV = ball.LinearVelocity;
+        SnVector3 deltaP = ball.Position - point;
+        SnVector3 deltaV = ball.LinearVelocity;
 
-        if (Vector3.Dot(deltaP, deltaV) >= 0)
+        if (SnVector3.Dot(deltaP, deltaV) >= 0)
         {
             return float.PositiveInfinity;
         }
 
         float aQuad = deltaV.LengthSquared();
-        float bQuad = 2.0f * Vector3.Dot(deltaP, deltaV);
+        float bQuad = 2.0f * SnVector3.Dot(deltaP, deltaV);
         float cQuad = deltaP.LengthSquared() - (GameSettings.BallRadius * GameSettings.BallRadius);
 
         if (cQuad <= 0 && bQuad < 0)
@@ -86,13 +86,13 @@ public static class CollisionDetection
 
     public static float CalculatePocketCrossTime(in BallState ball, in PocketBeam pocket, float ballRadius)
     {
-        float vNorm = Vector3.Dot(ball.LinearVelocity, pocket.Normal);
+        float vNorm = SnVector3.Dot(ball.LinearVelocity, pocket.Normal);
         if (vNorm >= 0)
         {
             return float.PositiveInfinity;
         }
 
-        float distToPlane = Vector3.Dot(ball.Position - pocket.P1, pocket.Normal);
+        float distToPlane = SnVector3.Dot(ball.Position - pocket.P1, pocket.Normal);
         float combinedRadii = pocket.Radius + ballRadius;
 
         float timeToTouch = (combinedRadii - distToPlane) / vNorm;
@@ -102,18 +102,18 @@ public static class CollisionDetection
             return float.PositiveInfinity;
         }
 
-        Vector3 futurePos = ball.Position + (ball.LinearVelocity * timeToTouch);
+        SnVector3 futurePos = ball.Position + (ball.LinearVelocity * timeToTouch);
 
         if ((futurePos.Y - ballRadius) > pocket.Height)
         {
             return float.PositiveInfinity;
         }
 
-        Vector3 beamVector = pocket.P2 - pocket.P1;
-        Vector3 ballToP1 = futurePos - pocket.P1;
+        SnVector3 beamVector = pocket.P2 - pocket.P1;
+        SnVector3 ballToP1 = futurePos - pocket.P1;
 
         float beamLengthSq = beamVector.LengthSquared();
-        float tProj = Vector3.Dot(ballToP1, beamVector) / beamLengthSq;
+        float tProj = SnVector3.Dot(ballToP1, beamVector) / beamLengthSq;
 
         if (tProj >= 0f && tProj <= 1f)
         {
@@ -125,11 +125,11 @@ public static class CollisionDetection
 
     public static float CalculateBallBallImpactTime(in BallState a, in BallState b)
     {
-        Vector3 deltaP = a.Position - b.Position;
-        Vector3 deltaV = a.LinearVelocity - b.LinearVelocity;
+        SnVector3 deltaP = a.Position - b.Position;
+        SnVector3 deltaV = a.LinearVelocity - b.LinearVelocity;
 
         float aQuad = deltaV.LengthSquared();
-        float bQuad = 2.0f * Vector3.Dot(deltaP, deltaV);
+        float bQuad = 2.0f * SnVector3.Dot(deltaP, deltaV);
         float cQuad = deltaP.LengthSquared() - (4.0f * GameSettings.BallRadius * GameSettings.BallRadius);
 
         if (cQuad < 0 && bQuad < 0)

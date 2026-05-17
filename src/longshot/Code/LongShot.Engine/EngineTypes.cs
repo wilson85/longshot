@@ -1,5 +1,5 @@
 using System;
-using System.Numerics;
+using SnVector3 = System.Numerics.Vector3;
 
 namespace LongShot.Engine;
 

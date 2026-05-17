@@ -1,5 +1,6 @@
 using System.Collections.Generic;
-using System.Numerics;
+using SnVector3 = System.Numerics.Vector3;
+using SnVector2 = System.Numerics.Vector2;
 
 namespace LongShot.Engine;
 
@@ -34,41 +35,41 @@ public sealed class TableDefinition
         float hw = GameSettings.RailWidth / 2f;
 
         // Pockets (corners and sides)
-        table.Pockets.Add(new PocketData("Gate_BL", new Vector3(-w2, 0, -l2 + cc), new Vector3(-w2 + cc, 0, -l2), new Vector3(-1, 0, -1)));
-        table.Pockets.Add(new PocketData("Gate_BR", new Vector3(w2 - cc, 0, -l2), new Vector3(w2, 0, -l2 + cc), new Vector3(1, 0, -1)));
-        table.Pockets.Add(new PocketData("Gate_TL", new Vector3(-w2 + cc, 0, l2), new Vector3(-w2, 0, l2 - cc), new Vector3(-1, 0, 1)));
-        table.Pockets.Add(new PocketData("Gate_TR", new Vector3(w2, 0, l2 - cc), new Vector3(w2 - cc, 0, l2), new Vector3(1, 0, 1)));
-        table.Pockets.Add(new PocketData("Gate_MidL", new Vector3(-w2, 0, sc), new Vector3(-w2, 0, -sc), new Vector3(-1, 0, 0)));
-        table.Pockets.Add(new PocketData("Gate_MidR", new Vector3(w2, 0, -sc), new Vector3(w2, 0, sc), new Vector3(1, 0, 0)));
+        table.Pockets.Add(new PocketData("Gate_BL", new SnVector3(-w2, 0, -l2 + cc), new SnVector3(-w2 + cc, 0, -l2), new SnVector3(-1, 0, -1)));
+        table.Pockets.Add(new PocketData("Gate_BR", new SnVector3(w2 - cc, 0, -l2), new SnVector3(w2, 0, -l2 + cc), new SnVector3(1, 0, -1)));
+        table.Pockets.Add(new PocketData("Gate_TL", new SnVector3(-w2 + cc, 0, l2), new SnVector3(-w2, 0, l2 - cc), new SnVector3(-1, 0, 1)));
+        table.Pockets.Add(new PocketData("Gate_TR", new SnVector3(w2, 0, l2 - cc), new SnVector3(w2 - cc, 0, l2), new SnVector3(1, 0, 1)));
+        table.Pockets.Add(new PocketData("Gate_MidL", new SnVector3(-w2, 0, sc), new SnVector3(-w2, 0, -sc), new SnVector3(-1, 0, 0)));
+        table.Pockets.Add(new PocketData("Gate_MidR", new SnVector3(w2, 0, -sc), new SnVector3(w2, 0, sc), new SnVector3(1, 0, 0)));
 
         // Rails
         table.Rails.Add(new RailData("Bottom",
-            new Vector2(-w2 + cc, -l2 - hw), new Vector2(w2 - cc, -l2 - hw),
+            new SnVector2(-w2 + cc, -l2 - hw), new SnVector2(w2 - cc, -l2 - hw),
             new JawSpec { Cutout = cornerCut, AngleDeg = GameSettings.RailCornerSweep },
             new JawSpec { Cutout = cornerCut, AngleDeg = GameSettings.RailCornerSweep }));
 
         table.Rails.Add(new RailData("Top",
-            new Vector2(w2 - cc, l2 + hw), new Vector2(-w2 + cc, l2 + hw),
+            new SnVector2(w2 - cc, l2 + hw), new SnVector2(-w2 + cc, l2 + hw),
             new JawSpec { Cutout = cornerCut, AngleDeg = GameSettings.RailCornerSweep },
             new JawSpec { Cutout = cornerCut, AngleDeg = GameSettings.RailCornerSweep }));
 
         table.Rails.Add(new RailData("Right_Bottom",
-            new Vector2(w2 + hw, -l2 + cc), new Vector2(w2 + hw, -sc),
+            new SnVector2(w2 + hw, -l2 + cc), new SnVector2(w2 + hw, -sc),
             new JawSpec { Cutout = cornerCut, AngleDeg = GameSettings.RailCornerSweep },
             new JawSpec { Cutout = sideCut, AngleDeg = GameSettings.RailSideSweep }));
 
         table.Rails.Add(new RailData("Right_Top",
-            new Vector2(w2 + hw, sc), new Vector2(w2 + hw, l2 - cc),
+            new SnVector2(w2 + hw, sc), new SnVector2(w2 + hw, l2 - cc),
             new JawSpec { Cutout = sideCut, AngleDeg = GameSettings.RailSideSweep },
             new JawSpec { Cutout = cornerCut, AngleDeg = GameSettings.RailCornerSweep }));
 
         table.Rails.Add(new RailData("Left_Bottom",
-            new Vector2(-w2 - hw, -sc), new Vector2(-w2 - hw, -l2 + cc),
+            new SnVector2(-w2 - hw, -sc), new SnVector2(-w2 - hw, -l2 + cc),
             new JawSpec { Cutout = sideCut, AngleDeg = GameSettings.RailSideSweep },
             new JawSpec { Cutout = cornerCut, AngleDeg = GameSettings.RailCornerSweep }));
 
         table.Rails.Add(new RailData("Left_Top",
-            new Vector2(-w2 - hw, l2 - cc), new Vector2(-w2 - hw, sc),
+            new SnVector2(-w2 - hw, l2 - cc), new SnVector2(-w2 - hw, sc),
             new JawSpec { Cutout = cornerCut, AngleDeg = GameSettings.RailCornerSweep },
             new JawSpec { Cutout = sideCut, AngleDeg = GameSettings.RailSideSweep }));
 
@@ -79,12 +80,12 @@ public sealed class TableDefinition
 public sealed class RailData
 {
     public string Name { get; init; }
-    public Vector2 Start { get; init; }
-    public Vector2 End { get; init; }
+    public SnVector2 Start { get; init; }
+    public SnVector2 End { get; init; }
     public JawSpec StartJaw { get; init; }
     public JawSpec EndJaw { get; init; }
 
-    public RailData(string name, Vector2 start, Vector2 end, JawSpec startJaw, JawSpec endJaw)
+    public RailData(string name, SnVector2 start, SnVector2 end, JawSpec startJaw, JawSpec endJaw)
     {
         Name = name;
         Start = start;
@@ -97,11 +98,11 @@ public sealed class RailData
 public sealed class PocketData
 {
     public string Name { get; init; }
-    public Vector3 P1 { get; init; }
-    public Vector3 P2 { get; init; }
-    public Vector3 PullDir { get; init; }
+    public SnVector3 P1 { get; init; }
+    public SnVector3 P2 { get; init; }
+    public SnVector3 PullDir { get; init; }
 
-    public PocketData(string name, Vector3 p1, Vector3 p2, Vector3 pullDir)
+    public PocketData(string name, SnVector3 p1, SnVector3 p2, SnVector3 pullDir)
     {
         Name = name;
         P1 = p1;
@@ -118,7 +119,7 @@ public struct JawSpec
 
 public struct LineSegment
 {
-    public Vector2 Start;
-    public Vector2 End;
-    public Vector2 Normal;
+    public SnVector2 Start;
+    public SnVector2 End;
+    public SnVector2 Normal;
 }

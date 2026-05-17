@@ -58,6 +58,8 @@ When you drag the cloud asset onto this slot in the editor, it gets serialized i
 
 Option C — pre-author the GameObjects in edit mode (orange ground plane, yellow cube earlier in this session). The bridge's `create_gameobject` + `assign_model` flow does this, and the resulting renderers always work in play mode because the model assignment is part of the scene serialization.
 
+Option D — **build the mesh procedurally at runtime** (no `.vmdl` involved at all). The vertex buffer goes straight to the GPU and renders correctly regardless of spawn pattern. See the next section for the canonical recipe. Use this when you don't need authored assets — e.g. a billiards slate, rails, or any parametric geometry.
+
 ### Diagnostic procedure
 
 When a runtime ModelRenderer doesn't render, swap the `Model` to `models/dev/box.vmdl` (50u cube). If THAT renders, the original asset is the issue, not the spawn code. If the dev box also doesn't render, look at camera framing / transform / scene clones / parent-disabled.
@@ -86,6 +88,77 @@ To verify a model's native size: spawn a GameObject with `LocalScale = (1,1,1)`,
 | Mounted cloud asset | runtime (`Model.Load` or `Cloud.Model`) | ❌ silent failure |
 
 The asymmetry on the last row is the bug.
+
+## Procedural meshes — the asset-free path
+
+Verified 2026-05-17 against `Facepunch/sbox-public` (`QuakeModel.cs`). Procedurally-generated `Model`s **bypass the cloud-asset rendering bug entirely** — there's no `.vmdl` to load, no mounting, no edit-time serialization step. The vertex buffer goes straight to the GPU.
+
+### Canonical recipe
+
+```csharp
+using Sandbox;
+using System.Collections.Generic;
+
+// 1) Get a material. CRITICAL: do NOT use Material.Create(name, shader) — that
+//    produces an unfilled placeholder which renders as the magenta-checker
+//    "missing texture" stand-in. Use Material.Load for a real .vmat.
+var material = Material.Load("materials/default.vmat");   // plain white PBR; pairs well with ModelRenderer.Tint
+
+// 2) Build a Sandbox.Mesh (NOT HalfEdgeMesh.Mesh — that's a different editor type).
+var mesh = new Mesh(material);
+
+// 3) Author vertices + indices. SimpleVertex has a 4-arg positional constructor:
+//    (position, normal, tangent, uv0).
+var verts = new List<SimpleVertex>();
+var indices = new List<int>();
+// ... fill verts + indices (CCW winding from outside view → outward-facing normals) ...
+
+mesh.CreateVertexBuffer(verts.Count, verts);
+mesh.CreateIndexBuffer(indices.Count, indices);
+mesh.Bounds = new BBox(min, max);                          // explicit bounds for culling
+
+// 4) Wrap the Mesh in a Model via Model.Builder.
+//    Model.Builder is a STATIC PROPERTY on Model — NOT `new ModelBuilder()`.
+Model model = Model.Builder
+    .WithName("my-procedural-thing")
+    .AddMesh(mesh)
+    .Create();
+
+// 5) Assign exactly like any other Model.
+var renderer = go.AddComponent<ModelRenderer>();
+renderer.Model = model;
+renderer.Tint = Color.Cyan;       // multiplies against the default white material
+```
+
+For a worked example, see `src/longshot/Code/Visuals/ProceduralMeshes.cs` in this repo (`BuildBox(halfExtents, material)` — 24-vertex box with per-face normals + UVs).
+
+### Why this works when cloud `.vmdl` doesn't
+
+Cloud `.vmdl` assets need their mesh data baked-and-bound at compile/serialization time. `Model.Load(path)` at runtime returns metadata but the GPU buffers aren't wired up unless the model was edit-mode-serialized somewhere.
+
+Procedural meshes build the GPU buffers in-process via `Mesh.CreateVertexBuffer` / `CreateIndexBuffer`. There's no intermediate `.vmdl` and no serialization step to fail — the renderer gets a fully-bound Model object directly.
+
+### When to use procedural vs `models/dev/*.vmdl`
+
+| Scenario | Recommended |
+|---|---|
+| Quick dev primitive (cube, sphere) | `Model.Load("models/dev/box.vmdl")` — 50u native, zero code |
+| Parametric geometry (slate of size W×D×T, custom rail profiles) | Procedural — exact dimensions, no scale math |
+| Anything sourced from an existing artist-authored `.vmdl` (cloud) | Author the GameObject in edit mode (Inspector slot or `create_gameobject` + `assign_model`) — see Option B/C above |
+| Need per-face material assignment, runtime topology, or vertex colours | Procedural — only path that exposes the vertex buffer |
+
+### Gotchas worth knowing
+
+- **`Material.Create("name", "shader_name")` produces a placeholder** that renders as the magenta-checker "missing texture" stand-in. It's technically a valid `Material` but has no shader bindings filled in. Always prefer `Material.Load("materials/default.vmat")` (or another real `.vmat`). The default vmat is a plain white PBR material that `ModelRenderer.Tint` multiplies against — letting you pick colour per renderer without authoring more materials.
+- **`Model.Builder` is a static property on `Model`** (not `new ModelBuilder()`). It returns a fresh `ModelBuilder` ready to chain. Pattern: `Model.Builder.WithName(...).AddMesh(...).Create()`.
+- **`Sandbox.Mesh` ≠ `HalfEdgeMesh.Mesh`**. There are two types named `Mesh` in the s&box surface:
+  - `Sandbox.Mesh` — the renderable mesh you pass to `Model.Builder.AddMesh`. Constructor takes a `Material`. Use this for runtime rendering.
+  - `HalfEdgeMesh.Mesh` — an editor-side half-edge structure for authoring tools. NOT what `Model.Builder.AddMesh` accepts.
+
+  Get the alias right: `using Sandbox;` then `new Mesh(material)` resolves to `Sandbox.Mesh`. If the compiler chooses the half-edge type, it means another `using` shadowed it — fully-qualify with `new Sandbox.Mesh(material)`.
+- **Winding order matters.** CCW from outside view → normal points outward → renders to the camera. Reversed winding will look invisible (back-face culled) even with correct vertex data. The bench's per-face quad helper (`ProceduralMeshes.AddQuad`) shows the convention.
+- **One vertex per face-corner, not per cube-corner**. A flat-shaded box needs 24 vertices (4 per face × 6 faces), not 8. Shared-corner verts would average normals across faces and give Gouraud-shaded rounding instead of crisp face normals. Same applies to UVs and per-face material.
+- **`mesh.Bounds` should be set explicitly**. The renderer uses it for culling. If you forget it, the mesh may render correctly when on-camera but disappear under aggressive culling.
 
 ## Vector3 / Vector2 / Sandbox math conventions
 
@@ -141,6 +214,45 @@ The Claude bridge (file-IPC: `LouSputthole/Sbox-Claude`, package `sboxskinsgg/cl
 `take_screenshot` calls `EditorScene.TakeHighResScreenshot`, which renders from the **editor's free-fly viewport camera**, not the play scene's `CameraComponent`. During play, the editor viewport stays parked wherever the user last had it. If you `set_transform` the main Camera and then `take_screenshot`, you're capturing a completely unrelated angle.
 
 **Use the user's Win+Shift+S screenshot as ground truth** when verifying what the player actually sees. The bridge screenshot is fine for verifying the scene is populated (you can see objects from any angle) but not for verifying camera framing.
+
+### Hot-reload + compile errors fail SILENTLY — verify with glider
+
+Verified 2026-05-17 (cost a full debug cycle). When the bridge's `trigger_hotload` is called or `start_play` is invoked and your edited C# code has a compile error, the editor **keeps running the previously-compiled assembly** with zero indication that the new code didn't load:
+
+- `trigger_hotload` returns `"Hotload triggered — s&box is recompiling scripts"` regardless of whether the new compile succeeded
+- `start_play` returns `{"started": true, "method": "EditorScene.Play"}` and the game runs fine — just with the OLD code
+- The scene hierarchy, runtime properties, and screenshots all look plausible but reflect the previous build
+- No error log surfaces through the bridge
+
+**How to detect**: read a runtime property that *should* reflect the new code. In our case, `mcp__sbox__get_runtime_property` on a rail's `Model.Name` returned `"procbox-..."` (the old box-based path) when the new code would have produced `"procprism-..."` — that's the smoking gun.
+
+**How to find the actual error fast**: load the project in glider and read diagnostics. This caught a missing `using System;` (for `MathF`) in seconds:
+
+```
+mcp__glider__load { filePath: ".../longshot.csproj" }
+mcp__glider__get_diagnostics { severity: "error" }
+→ CS0103: The name 'MathF' does not exist in the current context  (line 165)
+```
+
+`dotnet build` on the corresponding wrapper project (e.g. `LongShot.Engine.csproj` if the error is in engine code) also catches it, but doesn't cover code that only lives under `src/longshot/Code/` (s&box editor compiles that itself — MSBuild won't see it). Glider is the universal diagnostic for s&box game code.
+
+Bake-it-into-the-loop tip: any time the bridge "says yes" but the runtime behaviour looks like nothing changed, run `mcp__glider__get_diagnostics` before anything else.
+
+### `take_screenshot` ignores the `path` parameter
+
+Verified 2026-05-17: passing `path: "screenshots/foo.png"` results in the file being saved as `<sbox-install>/screenshots/sbox.<timestamp>.png` regardless. The tool's success `note` even claims it honoured the path, but the file isn't there. To find a screenshot you just took:
+
+```bash
+# Find the sbox install root once (cache the result):
+wmic process where "name='sbox-dev.exe'" get ExecutablePath /format:list
+# → ExecutablePath=F:\SteamLibrary\steamapps\common\sbox 590830\sbox-dev.exe
+
+# Then list newest screenshot:
+dir /b /od "<sbox-install>\screenshots" | tail -1
+# → sbox.2026.05.17.20.29.47.png
+```
+
+The filename pattern is `sbox.YYYY.MM.DD.HH.MM.SS.png` in the editor's local timezone (BST on this machine, so screenshots taken at UTC 19:29 land as `20.29.*`).
 
 ### `is_playing` returns mixed signals
 
@@ -234,3 +346,5 @@ This skill is the canonical place to capture s&box rendering / runtime quirks di
 - GameObject API: https://sbox.game/dev/doc/scene/gameobject.md
 - Prefabs (runtime instantiation): https://sbox.game/dev/doc/scene/prefabs.md
 - scenestaging Gun.cs (runtime spawn reference): https://github.com/Facepunch/sbox-scenestaging/blob/main/Code/ExampleComponents/Gun.cs
+- Procedural mesh reference (Facepunch/sbox-public `QuakeModel.cs`): canonical `Mesh` + `Model.Builder` usage pattern verified against the engine repo
+- Local worked example: `src/longshot/Code/Visuals/ProceduralMeshes.cs`

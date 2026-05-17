@@ -1,5 +1,5 @@
 using System;
-using System.Numerics;
+using SnVector3 = System.Numerics.Vector3;
 using LongShot.Engine;
 
 namespace LongShot.Shot;
@@ -13,13 +13,13 @@ public sealed class CueStrikeData
 {
     public int CueBallId { get; init; }
     /// <summary>Raw aim direction as passed to StrikeCueBall (pre-normalisation).</summary>
-    public Vector3 AimRaw { get; init; }
+    public SnVector3 AimRaw { get; init; }
     /// <summary>Normalised aim direction. <c>AimNormalized.Y &lt; 0</c> means the cue is elevated.</summary>
-    public Vector3 AimNormalized { get; init; }
+    public SnVector3 AimNormalized { get; init; }
     /// <summary>Impulse magnitude in N·s. Initial cue speed = Force / Ball.Mass.</summary>
     public float Force { get; init; }
     /// <summary>Strike offset on the cue tip relative to ball centre. Length up to <c>BallRadius * Cue.MiscueLimit</c>.</summary>
-    public Vector3 HitOffset { get; init; }
+    public SnVector3 HitOffset { get; init; }
 
     /// <summary>Cue elevation in radians from horizontal. 0 = level, π/2 = straight down.</summary>
     public float ElevationRadians => MathF.Asin(MathF.Max(-1f, MathF.Min(1f, -AimNormalized.Y)));
@@ -35,4 +35,4 @@ public sealed class CueStrikeData
 public sealed record BallContactEvent(int BallA, int BallB, float Time);
 public sealed record RailContactEvent(int BallId, int RailSegmentIndex, float ImpactSpeed, float Time);
 public sealed record JawContactEvent(int BallId, int JawCornerIndex, float ImpactSpeed, float Time);
-public sealed record PocketingEvent(int BallId, Vector3 DropPosition, float Time);
+public sealed record PocketingEvent(int BallId, SnVector3 DropPosition, float Time);

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.Numerics;
+using SnVector3 = System.Numerics.Vector3;
+using SnVector2 = System.Numerics.Vector2;
 using LongShot.Engine;
 
 namespace LongShot.Shot;
@@ -35,8 +36,8 @@ public sealed class ShotRecorder : IDisposable
     private float _cueMaxHeight;
     private float _cueMaxSpeed;
     private float _cueTotalDistance;
-    private Vector3 _cuePrevPosition;
-    private Vector3 _cueLaunchHeading;     // horizontal heading right after the strike
+    private SnVector3 _cuePrevPosition;
+    private SnVector3 _cueLaunchHeading;     // horizontal heading right after the strike
     private bool _disposed;
 
     public ShotRecorder(BilliardsEngine engine, int cueBallId = 0)
@@ -69,7 +70,7 @@ public sealed class ShotRecorder : IDisposable
 
         if (cue.State == MotionState.Airborne) _cueAirborneEverObserved = true;
 
-        _cueTotalDistance += Vector3.Distance(cue.Position, _cuePrevPosition);
+        _cueTotalDistance += SnVector3.Distance(cue.Position, _cuePrevPosition);
         _cuePrevPosition = cue.Position;
     }
 
@@ -105,13 +106,13 @@ public sealed class ShotRecorder : IDisposable
         if (_strike != null && _strike.ElevationDegrees > 45f && _cueLaunchHeading.LengthSquared() > 1e-4f)
         {
             var stateNow = _engine.PhysicsStates[_cueBallId];
-            var finalHeading = new Vector2(
+            var finalHeading = new SnVector2(
                 stateNow.Position.X - _stateAtStrike[_cueBallId].Position.X,
                 stateNow.Position.Z - _stateAtStrike[_cueBallId].Position.Z);
             if (finalHeading.LengthSquared() > 1e-4f)
             {
-                var launchHorizon = new Vector2(_cueLaunchHeading.X, _cueLaunchHeading.Z);
-                float cos = Vector2.Dot(Vector2.Normalize(launchHorizon), Vector2.Normalize(finalHeading));
+                var launchHorizon = new SnVector2(_cueLaunchHeading.X, _cueLaunchHeading.Z);
+                float cos = SnVector2.Dot(SnVector2.Normalize(launchHorizon), SnVector2.Normalize(finalHeading));
                 cos = MathF.Max(-1f, MathF.Min(1f, cos));
                 float angleDeg = MathF.Acos(cos) * (180f / MathF.PI);
                 wasMasse = angleDeg > 25f;
@@ -161,10 +162,10 @@ public sealed class ShotRecorder : IDisposable
 
     // ---- Event handlers ----
 
-    private void HandleCueStrike(int id, Vector3 aim, float force, Vector3 offset)
+    private void HandleCueStrike(int id, SnVector3 aim, float force, SnVector3 offset)
     {
         if (id != _cueBallId) return;
-        var aimNorm = aim.LengthSquared() > 1e-8f ? Vector3.Normalize(aim) : Vector3.Zero;
+        var aimNorm = aim.LengthSquared() > 1e-8f ? SnVector3.Normalize(aim) : SnVector3.Zero;
         _strike = new CueStrikeData
         {
             CueBallId = id,
@@ -188,6 +189,6 @@ public sealed class ShotRecorder : IDisposable
     private void HandleJawContact(int id, int jawIndex, float speed) =>
         _jawContacts.Add(new JawContactEvent(id, jawIndex, speed, _engine.TotalSimulatedTime));
 
-    private void HandlePocketed(int id, Vector3 dropPos) =>
+    private void HandlePocketed(int id, SnVector3 dropPos) =>
         _pocketings.Add(new PocketingEvent(id, dropPos, _engine.TotalSimulatedTime));
 }

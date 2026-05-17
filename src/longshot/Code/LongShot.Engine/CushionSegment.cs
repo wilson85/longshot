@@ -1,17 +1,17 @@
-using System.Numerics;
+using SnVector3 = System.Numerics.Vector3;
 
 namespace LongShot.Engine;
 
 public readonly struct CushionSegment
 {
-    public readonly Vector3 Start;
-    public readonly Vector3 End;
-    public readonly Vector3 Normal;
+    public readonly SnVector3 Start;
+    public readonly SnVector3 End;
+    public readonly SnVector3 Normal;
 
-    public CushionSegment(Vector3 start, Vector3 end, Vector3 normal)
+    public CushionSegment(SnVector3 start, SnVector3 end, SnVector3 normal)
     {
         Start = start;
         End = end;
-        Normal = Vector3.Normalize(normal);
+        Normal = SnVector3.Normalize(normal);
     }
 }
