@@ -67,5 +67,5 @@ Then add `YourScenario.Run` to the `AllScenarios` array in `Program.cs`.
 - `Program.cs` - runs every scenario in order, prints summary, returns exit code.
 
 The bench references `LongShot.Engine` directly. It has zero dependency on
-the Evergine game project - so a passing bench means the engine is healthy
+the s&box host project - so a passing bench means the engine is healthy
 regardless of what's happening on the rendering side.

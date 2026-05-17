@@ -1,11 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <!-- Single-target net10.0: everything in the repo (Bench, Train, s&box host) is on .NET 10. -->
+    <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>LongShot.Engine</RootNamespace>
     <AssemblyName>LongShot.Engine</AssemblyName>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
-    <Description>Headless billiards simulation core. Pure System.Numerics, zero external engine dependencies. Portable target for Evergine, s&amp;box, console, tests.</Description>
+    <Description>Headless billiards simulation core. Pure System.Numerics, zero external engine dependencies. Source of truth lives under src/longshot/Code/LongShot.Engine/ so the s&amp;box editor's Razor SDK auto-discovers it; this csproj pulls the same files back via Compile Include for Bench / Train.</Description>
+    <!-- Source files live in the s&box project tree (so the editor's auto-discovery picks them up).
+         Disable default item discovery for this dir (it's empty of .cs) and pull the canonical files in explicitly. -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\longshot\Code\LongShot.Engine\*.cs" Link="%(Filename)%(Extension)" />
+  </ItemGroup>
 </Project>

@@ -1,13 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>LongShot.Shot</RootNamespace>
     <AssemblyName>LongShot.Shot</AssemblyName>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
-    <Description>Per-shot event recording and the IShotObserver contract. Consumes engine events, produces a ShotSummary that rules/scoring/power-ups all read from.</Description>
+    <Description>Per-shot event recording and the IShotObserver contract. Source lives under src/longshot/Code/LongShot.Shot/ - this csproj pulls it in for Bench / Train.</Description>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\longshot\Code\LongShot.Shot\*.cs" Link="%(Filename)%(Extension)" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\LongShot.Engine\LongShot.Engine.csproj" />
   </ItemGroup>

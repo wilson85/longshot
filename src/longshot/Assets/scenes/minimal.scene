@@ -1,6 +1,241 @@
 {
   "__guid": "81898588-1693-4880-8598-0609d8c5b41e",
-  "GameObjects": [],
+  "GameObjects": [
+    {
+      "__guid": "b151aed3-21e7-43e1-b65e-0f0d224ea999",
+      "__version": 2,
+      "Flags": 0,
+      "Name": "Camera",
+      "Position": "0,-180,130",
+      "Rotation": "-0.183012694,0.183012694,0.683012664,0.683012664",
+      "Scale": "1,1,1",
+      "Tags": "maincamera",
+      "Enabled": true,
+      "NetworkMode": 2,
+      "NetworkFlags": 0,
+      "NetworkOrphaned": 0,
+      "NetworkTransmit": true,
+      "OwnerTransfer": 1,
+      "Components": [
+        {
+          "__type": "Sandbox.CameraComponent",
+          "__guid": "2760e285-a16a-4ab7-bc9e-2c13c6230be2",
+          "__enabled": true,
+          "Flags": 0,
+          "BackgroundColor": "0.33333,0.46275,0.52157,1",
+          "ClearFlags": "All",
+          "EnablePostProcessing": true,
+          "FieldOfView": 60,
+          "FovAxis": "Horizontal",
+          "IsMainCamera": true,
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null,
+          "Orthographic": false,
+          "OrthographicHeight": 1204,
+          "PostProcessAnchor": null,
+          "Priority": 1,
+          "RenderExcludeTags": "",
+          "RenderTags": "",
+          "RenderTexture": null,
+          "TargetEye": "None",
+          "Viewport": "0,0,1,1",
+          "ZFar": 10000,
+          "ZNear": 1
+        },
+        {
+          "__type": "Longshot.FreeCam",
+          "__guid": "2e2896d9-ee82-4558-a499-58125e182aee",
+          "__enabled": true,
+          "Flags": 0,
+          "MouseSensitivity": 1,
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null,
+          "PitchClamp": 89,
+          "RequireRightMouseToLook": false,
+          "Speed": 250
+        }
+      ],
+      "Children": []
+    },
+    {
+      "__guid": "e03a6cd4-01de-47b1-bd03-11b635be6760",
+      "__version": 2,
+      "Flags": 0,
+      "Name": "SkyBox",
+      "Position": "0,373.780182,0",
+      "Rotation": "0,0,0,1",
+      "Scale": "1,1,1",
+      "Tags": "skybox",
+      "Enabled": true,
+      "NetworkMode": 2,
+      "NetworkFlags": 0,
+      "NetworkOrphaned": 0,
+      "NetworkTransmit": true,
+      "OwnerTransfer": 1,
+      "Components": [
+        {
+          "__type": "Sandbox.SkyBox2D",
+          "__guid": "ee953481-a3cb-4220-a4d9-a2bf56b3f6e3",
+          "__enabled": true,
+          "Flags": 0,
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null,
+          "SkyIndirectLighting": true,
+          "SkyMaterial": "materials/skybox/skybox_day_01.vmat",
+          "Tint": "1,1,1,1"
+        },
+        {
+          "__type": "Sandbox.EnvmapProbe",
+          "__guid": "a83afc37-cec7-439b-bde1-0d7cddf6929a",
+          "__enabled": true,
+          "Flags": 0,
+          "__version": 1,
+          "BakedTexture": null,
+          "Bounds": {
+            "Mins": "-512,-512,-512",
+            "Maxs": "512,512,512"
+          },
+          "DelayBetweenUpdates": 0.1,
+          "Feathering": 8,
+          "FrameInterval": 5,
+          "MaxDistance": 512,
+          "Mode": "Baked",
+          "MultiBounce": false,
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null,
+          "Priority": 0,
+          "Projection": "Sphere",
+          "Resolution": "Small",
+          "Texture": null,
+          "TintColor": "1,1,1,1",
+          "UpdateStrategy": "OnEnabled",
+          "ZFar": 4096,
+          "ZNear": 16
+        }
+      ],
+      "Children": []
+    },
+    {
+      "__guid": "cd534ee8-ae86-4fa5-8123-bcd18cd89e5c",
+      "__version": 2,
+      "Flags": 0,
+      "Name": "Directional Light",
+      "Position": "0,0,300",
+      "Rotation": "-0.109381653,0.408217907,0.234569713,0.875426054",
+      "Scale": "1,1,1",
+      "Tags": "light_directional,light",
+      "Enabled": true,
+      "NetworkMode": 2,
+      "NetworkFlags": 0,
+      "NetworkOrphaned": 0,
+      "NetworkTransmit": true,
+      "OwnerTransfer": 1,
+      "Components": [
+        {
+          "__type": "Sandbox.DirectionalLight",
+          "__guid": "62dbb1b3-ca59-4a5f-a25b-64e08be68266",
+          "__enabled": true,
+          "Flags": 0,
+          "FogMode": "Enabled",
+          "FogStrength": 1,
+          "LightColor": "0.91373,0.98039,1,1",
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null,
+          "ShadowBias": 0.0005,
+          "ShadowCascadeCount": 4,
+          "ShadowCascadeSplitRatio": 0.91,
+          "ShadowHardness": 0,
+          "Shadows": true,
+          "SkyColor": "0.4,0.45,0.5,1",
+          "Visualizer": {}
+        }
+      ],
+      "Children": []
+    },
+    {
+      "__guid": "61c5c8df-da38-457d-b754-a5046dc1ea5f",
+      "__version": 2,
+      "Flags": 0,
+      "Name": "Match",
+      "Position": "0,0,0",
+      "Rotation": "0,0,0,1",
+      "Scale": "1,1,1",
+      "Tags": "",
+      "Enabled": true,
+      "NetworkMode": 2,
+      "NetworkFlags": 0,
+      "NetworkOrphaned": 0,
+      "NetworkTransmit": true,
+      "OwnerTransfer": 1,
+      "Components": [
+        {
+          "__type": "Longshot.MatchHost",
+          "__guid": "e9f38876-7a59-45b9-a96c-f64228609913",
+          "__enabled": true,
+          "Flags": 0,
+          "AutoStrikeOnStart": true,
+          "BallPrefab": null,
+          "BoxModel": null,
+          "BoxModelNativeSize": 50,
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null,
+          "PocketColor": "0,0,0,1",
+          "RailColor": "0.32,0.2,0.12,1",
+          "RailHeightUnits": 2.5,
+          "RailThicknessUnits": 1.5,
+          "SlateColor": "0.04,0.4,0.27,1",
+          "SlateThicknessUnits": 1,
+          "SpawnTableVisuals": true,
+          "SphereModel": null,
+          "SphereModelNativeSize": 50,
+          "StrikeForce": 0.5
+        }
+      ],
+      "Children": []
+    },
+    {
+      "__guid": "2e213157-50ef-4735-b518-62224eded672",
+      "__version": 2,
+      "Flags": 0,
+      "Name": "Object",
+      "Position": "0,0,0",
+      "Rotation": "0,0,0,1",
+      "Scale": "1,1,1",
+      "Tags": "",
+      "Enabled": true,
+      "NetworkMode": 2,
+      "NetworkFlags": 0,
+      "NetworkOrphaned": 0,
+      "NetworkTransmit": true,
+      "OwnerTransfer": 1,
+      "Components": [],
+      "Children": []
+    }
+  ],
   "SceneProperties": {
     "NetworkInterpolation": true,
     "TimeScale": 1,
@@ -21,18 +256,18 @@
       "CustomBounds": false
     },
     "GameObjectSystems": {
-      "Sandbox.Clutter.ClutterGridSystem": {
-        "Storage": {
-          "$blob": "036b209e-4e2d-4163-b514-79bb38d8a716"
-        }
+      "Sandbox.MovieMaker.MovieRecorderSystem": {
+        "DisableClientRecording": false
       },
       "Sandbox.SelectionSetsSystem": {
         "Data": {
           "SelectionSets": []
         }
       },
-      "Sandbox.MovieMaker.MovieRecorderSystem": {
-        "DisableClientRecording": false
+      "Sandbox.Clutter.ClutterGridSystem": {
+        "Storage": {
+          "$blob": "036b209e-4e2d-4163-b514-79bb38d8a716"
+        }
       }
     }
   },

@@ -6,7 +6,10 @@
   "Schema": 1,
   "IncludeSourceFiles": false,
   "Resources": null,
-  "PackageReferences": [],
+  "PackageReferences": [
+    "vidya.model-cube64",
+    "vidya.model-sphere64"
+  ],
   "EditorReferences": null,
   "Mounts": null,
   "IsStandaloneOnly": false,
@@ -14,7 +17,7 @@
     "MaxPlayers": 64,
     "MinPlayers": 1,
     "TickRate": 50,
-    "GameNetworkType": "Multiplayer",
+    "GameNetworkType": "Singleplayer",
     "MapSelect": "Unrestricted",
     "MapList": [
       "facepunch.flatgrass"

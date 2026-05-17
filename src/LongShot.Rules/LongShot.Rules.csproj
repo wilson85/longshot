@@ -1,13 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>LongShot.Rules</RootNamespace>
     <AssemblyName>LongShot.Rules</AssemblyName>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
-    <Description>Concrete IShotObserver implementations: scoring, fouls, power-ups, achievements. Anything above the engine that interprets ShotSummary.</Description>
+    <Description>Concrete IShotObserver implementations: scoring, fouls, power-ups, achievements. Source lives under src/longshot/Code/LongShot.Rules/ - this csproj pulls it in for Bench / Train.</Description>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\longshot\Code\LongShot.Rules\*.cs" Link="%(Filename)%(Extension)" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\LongShot.Shot\LongShot.Shot.csproj" />
   </ItemGroup>
