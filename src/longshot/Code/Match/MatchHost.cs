@@ -102,8 +102,37 @@ public sealed class MatchHost : Component
     /// <summary>Distance the cue's tip is pulled back from the cue ball when at rest (units).</summary>
     [Property, Range(0f, 20f)] public float CueDrawbackUnits { get; set; } = 4f;
 
+    /// <summary>Maximum drawback during a stroke (units). Caps the cue's visual pull-back and the resulting force.</summary>
+    [Property, Range(5f, 40f)] public float MaxDrawbackUnits { get; set; } = 18f;
+
+    /// <summary>Mouse sensitivity for the stroke gesture (units per pitch-degree of mouse motion).</summary>
+    [Property, Range(0.05f, 2f)] public float StrokeSensitivity { get; set; } = 0.35f;
+
+    /// <summary>Multiplier from "draw distance above rest" (units) to cue strike force (N·s).</summary>
+    [Property, Range(0.05f, 1f)] public float StrokeForceScale { get; set; } = 0.18f;
+
+    /// <summary>Minimum extra draw beyond rest before a release counts as a real stroke (units). Below this, click is treated as a cancel.</summary>
+    [Property, Range(0.5f, 5f)] public float StrokeFireThresholdUnits { get; set; } = 1.5f;
+
     /// <summary>Tint applied to the cue stick. Default: light maple wood.</summary>
     [Property] public Color CueColor { get; set; } = new Color(0.82f, 0.65f, 0.42f);
+
+    // -------------------- Overhead view + table legs --------------------
+
+    /// <summary>Height of the overhead camera above the slate (units) while RMB is held.</summary>
+    [Property, Range(60f, 300f)] public float OverheadHeightUnits { get; set; } = 130f;
+
+    /// <summary>Height of each procedural table leg (units). Real pool tables ≈ 30 inches = 30u.</summary>
+    [Property, Range(10f, 40f)] public float LegHeightUnits { get; set; } = 30f;
+
+    /// <summary>Cross-section (square) of each leg (units).</summary>
+    [Property, Range(2f, 12f)] public float LegWidthUnits { get; set; } = 6f;
+
+    /// <summary>How far the legs sit inset from the corner of the table (units). Small inset → flush with rails; larger → tucked under slate.</summary>
+    [Property, Range(0f, 15f)] public float LegInsetUnits { get; set; } = 4f;
+
+    /// <summary>Tint applied to leg ModelRenderers. Default: same dark walnut as the rails.</summary>
+    [Property] public Color LegColor { get; set; } = new Color(0.20f, 0.12f, 0.07f);
 
     private BilliardsEngine _engine;
     private readonly List<GameObject> _ballObjects = new();
@@ -116,6 +145,18 @@ public sealed class MatchHost : Component
     private float _aimPitchDeg;
     /// <summary>Spawned in OnStart, transformed every frame. Local +X is the cue's length axis (tip at +X).</summary>
     private GameObject _cueStickGo;
+
+    // --- Stroke state (Shooters-Pool-style: hold LMB or S, pull back then push forward) ---
+    /// <summary>True while the stroke button (LMB or S) is held.</summary>
+    private bool _stroking;
+    /// <summary>Live drawback distance during stroke (units). At rest, equals <see cref="CueDrawbackUnits"/>.</summary>
+    private float _currentDrawbackUnits;
+    /// <summary>Peak drawback reached during the current stroke. Force is computed from this on release.</summary>
+    private float _peakDrawbackUnits;
+
+    // --- Replay state ---
+    /// <summary>Ball-state snapshot captured immediately before the most recent <see cref="Strike"/>. Used by <see cref="Replay"/>.</summary>
+    private BallState[] _replaySnapshot;
 
     // --- Rules + per-shot lifecycle ---
     private EightBallRules _rules;
@@ -279,22 +320,47 @@ public sealed class MatchHost : Component
     {
         if (_engine is null) return;
 
-        // -------- Aim input (only while the shot has settled — locks aim during ball motion) --------
-        if (!_shotInFlight)
+        // ---- Read input modes (mutually exclusive on mouse) ----
+        bool overheadView  = Input.Down("Attack2");                                   // RMB held → overhead camera
+        bool strokeButton  = Input.Down("Attack1") || Input.Keyboard.Down("s");       // LMB or S held → stroke
+        bool strokeStart   = Input.Pressed("Attack1") || Input.Keyboard.Pressed("s");
+        bool strokeEnd     = Input.Released("Attack1") || Input.Keyboard.Released("s");
+        bool replayPressed = Input.Keyboard.Pressed("r");                             // R key → replay last shot
+
+        var look = Input.AnalogLook;                                                  // (pitch, yaw, roll) in degrees this frame
+
+        if (replayPressed)
         {
-            var look = Input.AnalogLook;                       // (pitch, yaw, roll) in degrees per frame
+            Replay();
+        }
+
+        // ---- Mode-driven input handling ----
+        if (_shotInFlight)
+        {
+            // Locked: balls are moving. No aim/stroke updates. Cue is hidden inside UpdateAimRig.
+        }
+        else if (strokeButton)
+        {
+            HandleStrokeWhileHeld(look);
+        }
+        else
+        {
+            // Free aim. Mouse drives yaw + camera pitch.
             _aimYawDeg += look.yaw * MouseSensitivity;
             _aimPitchDeg = MathX.Clamp(_aimPitchDeg + look.pitch * MouseSensitivity, MinPitchDeg, MaxPitchDeg);
-            // Normalise yaw to (-180, 180] to keep numbers tidy in the inspector.
-            _aimYawDeg = ((_aimYawDeg + 180f) % 360f + 360f) % 360f - 180f;
+            _aimYawDeg = ((_aimYawDeg + 180f) % 360f + 360f) % 360f - 180f;           // normalise to (-180, 180]
         }
 
-        UpdateAimRig();
-
-        if (Input.Pressed("Attack1"))
+        if (strokeStart && !_shotInFlight)
         {
-            Strike();
+            BeginStroke();
         }
+        if (strokeEnd && _stroking)
+        {
+            EndStroke();
+        }
+
+        UpdateAimRig(overheadView);
 
         var balls = _engine.PhysicsStates;
         for (int i = 0; i < balls.Length && i < _ballObjects.Count; i++)
@@ -314,10 +380,12 @@ public sealed class MatchHost : Component
 
     /// <summary>
     /// Place the camera and cue stick each frame based on <see cref="_aimYawDeg"/>,
-    /// <see cref="_aimPitchDeg"/>, and the cue ball's current world position. Idempotent — safe to call
-    /// from <see cref="OnStart"/> for first-frame placement and from <see cref="OnUpdate"/> thereafter.
+    /// <see cref="_aimPitchDeg"/>, the cue ball's current world position, and the active drawback.
+    /// Idempotent — safe to call from <see cref="OnStart"/> for first-frame placement and from
+    /// <see cref="OnUpdate"/> thereafter.
     /// </summary>
-    private void UpdateAimRig()
+    /// <param name="overheadView">If true, the camera switches to a top-down framing instead of the over-the-shoulder orbit.</param>
+    private void UpdateAimRig(bool overheadView = false)
     {
         if (_engine is null) return;
         if (_engine.PhysicsStates.Length == 0) return;        // no balls spawned yet
@@ -333,33 +401,112 @@ public sealed class MatchHost : Component
         // Aim direction is the horizontal vector the player is pointing at, in s&box world XY plane.
         Vector3 aimDirWorld = new Vector3(MathF.Cos(yawRad), MathF.Sin(yawRad), 0f);
 
-        // -------- Camera: orbit behind cue ball, look at cue ball --------
+        // -------- Camera --------
         if (ControlCamera && ViewCamera.IsValid())
         {
-            float horiz = CameraDistance * MathF.Cos(pitchRad);
-            float vert  = CameraDistance * MathF.Sin(pitchRad);
-            Vector3 camPos = cueBallWorld - aimDirWorld * horiz + new Vector3(0, 0, vert);
-
-            ViewCamera.GameObject.WorldPosition = camPos;
-            ViewCamera.GameObject.WorldRotation = Rotation.LookAt((cueBallWorld - camPos).Normal);
+            Vector3 camPos;
+            Vector3 lookAt;
+            if (overheadView)
+            {
+                // Top-down view above the table center. Yaw still tracks aim so the player's reference
+                // "forward" stays consistent (cue ball is always visually above the centre of the screen).
+                camPos = new Vector3(0, 0, OverheadHeightUnits);
+                lookAt = Vector3.Zero;
+                // Look straight down; yaw the camera so the aim direction points up in the view.
+                ViewCamera.GameObject.WorldPosition = camPos;
+                ViewCamera.GameObject.WorldRotation = Rotation.From(new Angles(90f, _aimYawDeg, 0f));
+            }
+            else
+            {
+                float horiz = CameraDistance * MathF.Cos(pitchRad);
+                float vert  = CameraDistance * MathF.Sin(pitchRad);
+                camPos = cueBallWorld - aimDirWorld * horiz + new Vector3(0, 0, vert);
+                ViewCamera.GameObject.WorldPosition = camPos;
+                ViewCamera.GameObject.WorldRotation = Rotation.LookAt((cueBallWorld - camPos).Normal);
+            }
         }
 
-        // -------- Cue stick: tip pulled back from the cue ball by CueDrawbackUnits along -aim --------
+        // -------- Cue stick --------
         if (_cueStickGo.IsValid())
         {
             _cueStickGo.Enabled = !_shotInFlight;             // hide while balls are moving
 
             if (!_shotInFlight)
             {
+                // Drawback: at rest = CueDrawbackUnits; during a stroke = _currentDrawbackUnits.
+                float drawback = _stroking ? _currentDrawbackUnits : CueDrawbackUnits;
+
                 // Local +X points along aimDirWorld. Tip at +halfLen in local; place GameObject so the tip
-                // sits one CueDrawbackUnits behind the cue ball (cue draws back from the ball at rest).
-                Vector3 tipTarget = cueBallWorld - aimDirWorld * CueDrawbackUnits;
+                // sits 'drawback' behind the cue ball (cue draws back from the ball during a stroke).
+                Vector3 tipTarget = cueBallWorld - aimDirWorld * drawback;
                 Vector3 cueCenter = tipTarget - aimDirWorld * (CueLengthUnits * 0.5f);
 
                 _cueStickGo.WorldPosition = cueCenter;
                 _cueStickGo.WorldRotation = Rotation.LookAt(aimDirWorld);
             }
         }
+    }
+
+    /// <summary>Begin a new stroke gesture. Captures the current drawback baseline and resets the peak tracker.</summary>
+    private void BeginStroke()
+    {
+        _stroking = true;
+        _currentDrawbackUnits = CueDrawbackUnits;
+        _peakDrawbackUnits    = CueDrawbackUnits;
+    }
+
+    /// <summary>
+    /// While the stroke button is held: integrate vertical mouse motion into <see cref="_currentDrawbackUnits"/>.
+    /// Positive <c>look.pitch</c> = mouse pulled down = cue drawn back (drawback increases). Drawback is
+    /// clamped to [0, <see cref="MaxDrawbackUnits"/>]; the peak during the stroke is captured separately for
+    /// the force calculation on release.
+    /// </summary>
+    private void HandleStrokeWhileHeld(Angles look)
+    {
+        _currentDrawbackUnits = MathX.Clamp(
+            _currentDrawbackUnits + look.pitch * StrokeSensitivity,
+            0f, MaxDrawbackUnits);
+        if (_currentDrawbackUnits > _peakDrawbackUnits) _peakDrawbackUnits = _currentDrawbackUnits;
+    }
+
+    /// <summary>
+    /// Stroke button released. If peak drawback exceeded the fire threshold AND the user actually pushed
+    /// forward (current drawback dropped from peak), fire the shot. Otherwise treat as a cancel.
+    /// Force is scaled from the peak drawback above the rest position.
+    /// </summary>
+    private void EndStroke()
+    {
+        bool didPullBack    = _peakDrawbackUnits > CueDrawbackUnits + StrokeFireThresholdUnits;
+        bool didPushForward = _currentDrawbackUnits < _peakDrawbackUnits - 0.5f;
+        if (didPullBack && didPushForward)
+        {
+            float drawAboveRest = _peakDrawbackUnits - CueDrawbackUnits;
+            float force         = drawAboveRest * StrokeForceScale;
+            Strike(force);
+        }
+        _stroking = false;
+        _currentDrawbackUnits = CueDrawbackUnits;
+        _peakDrawbackUnits    = CueDrawbackUnits;
+    }
+
+    /// <summary>
+    /// Restore ball positions to the state captured immediately before the most recent <see cref="Strike"/>.
+    /// Rules state is intentionally NOT rolled back — replay is for re-trying the same shot setup, not for
+    /// rewinding game history. Idempotent: no-op if there's no captured snapshot.
+    /// </summary>
+    public void Replay()
+    {
+        if (_replaySnapshot is null) return;
+        if (_shotInFlight)
+        {
+            // Mid-shot: cancel the in-flight shot before rolling back, otherwise FinishShot would
+            // resolve against the restored (pre-shot) state, which is nonsense.
+            _recorder?.Dispose();
+            _recorder = null;
+            _shotInFlight = false;
+        }
+        _engine.RestoreState(_replaySnapshot);
+        Log.Info($"Replay: restored {_replaySnapshot.Length} balls to pre-shot positions.");
     }
 
     /// <summary>
@@ -479,34 +626,74 @@ public sealed class MatchHost : Component
             _tableObjects.Add(pocket);
         }
 
+        // --- 4 corner legs. Boxes hanging below the slate at each table corner. ---
+        // Inset slightly so they tuck under the rails rather than poking out past the table boundary.
+        float widthHalf  = Conversions.MetresToUnits(def.Width)  * 0.5f;
+        float lengthHalf = Conversions.MetresToUnits(def.Length) * 0.5f;
+        float legHalfX   = LegWidthUnits * 0.5f;
+        float legHalfY   = LegWidthUnits * 0.5f;
+        float legHalfZ   = LegHeightUnits * 0.5f;
+        // Top of leg flush with bottom of slate (slate's bottom face is at z = -SlateThicknessUnits).
+        float legCentreZ = -SlateThicknessUnits - legHalfZ;
+
+        var legCornerOffsets = new (float sx, float sy)[]
+        {
+            (-1, -1), (+1, -1), (-1, +1), (+1, +1),
+        };
+        for (int i = 0; i < legCornerOffsets.Length; i++)
+        {
+            var (sx, sy) = legCornerOffsets[i];
+            var legModel = ProceduralMeshes.BuildBox(new Vector3(legHalfX, legHalfY, legHalfZ), material);
+            var leg = Scene.CreateObject(true);
+            leg.Name = $"Leg_{i}";
+            leg.WorldPosition = new Vector3(
+                sx * (lengthHalf - LegInsetUnits - legHalfX),
+                sy * (widthHalf  - LegInsetUnits - legHalfY),
+                legCentreZ);
+            var mr = leg.AddComponent<ModelRenderer>();
+            mr.Model = legModel;
+            mr.Tint  = LegColor;
+            _tableObjects.Add(leg);
+        }
+
         Log.Info($"{nameof(MatchHost)}.BuildTableVisuals: spawned {_tableObjects.Count} procedurally-built table GameObjects.");
     }
 
     /// <summary>
-    /// Strikes the cue ball along the current aim direction with the configured force. Wraps the
-    /// strike with a fresh <see cref="ShotRecorder"/> + <see cref="EightBallRules.OnShotStart"/>
-    /// so the rules observer sees the per-shot lifecycle. Ignored if a shot is already in flight
-    /// or the game's over.
+    /// Strike with the default <see cref="StrikeForce"/>. Convenience wrapper used by the AutoStrikeOnStart
+    /// path; the stroke-gesture flow calls <see cref="Strike(float)"/> directly with a peak-drawback-derived force.
+    /// </summary>
+    public void Strike() => Strike(StrikeForce);
+
+    /// <summary>
+    /// Strikes the cue ball along the current aim direction with the supplied force. Wraps the strike with
+    /// a fresh <see cref="ShotRecorder"/> + <see cref="EightBallRules.OnShotStart"/> so the rules observer
+    /// sees the per-shot lifecycle. Captures a ball-state snapshot for <see cref="Replay"/>. Ignored if a
+    /// shot is already in flight or the game's over.
     /// <para>
-    /// The aim direction comes from <see cref="_aimYawDeg"/> (set by mouse look in
-    /// <see cref="OnUpdate"/>). We project to s&amp;box's XY plane, convert to engine coords via
-    /// <see cref="Conversions.WorldToEngine"/>, and zero out any vertical component so the cue
-    /// always strikes parallel to the table (no jump-shot energy unless we add elevation later).
+    /// The aim direction comes from <see cref="_aimYawDeg"/> (set by mouse look in <see cref="OnUpdate"/>).
+    /// We project to s&amp;box's XY plane, convert to engine coords via <see cref="Conversions.WorldToEngine"/>,
+    /// and zero out any vertical component so the cue always strikes parallel to the table (no jump-shot
+    /// energy unless butt elevation gets wired up later).
     /// </para>
     /// </summary>
-    public void Strike()
+    /// <param name="force">Cue impulse magnitude (N·s). Force / Ball.Mass = initial cue-ball speed.</param>
+    public void Strike(float force)
     {
         // EightBallRules integration: per-shot lifecycle via ShotRecorder.
         if (_engine is null || _rules is null) return;
         if (_shotInFlight) return;             // already simulating a shot
         if (_rules.GameOver) return;           // game's done
 
+        // Capture pre-strike snapshot for Replay before anything mutates the engine.
+        _replaySnapshot = _engine.SnapshotState();
+
         _shotNumber++;
         _recorder = new ShotRecorder(_engine);
         _rules.OnShotStart(new ShotContext
         {
             ShotNumber = _shotNumber,
-            StateAtStart = _engine.SnapshotState(),
+            StateAtStart = _replaySnapshot,
         });
 
         // World aim direction in s&box's XY plane, derived from current aim yaw.
@@ -527,7 +714,7 @@ public sealed class MatchHost : Component
         _engine.StrikeCueBall(
             id: 0,
             aimDirection: aimDirEngine,
-            force: StrikeForce,
+            force: force,
             hitOffset: SnVec3.Zero);
 
         _shotInFlight = true;
