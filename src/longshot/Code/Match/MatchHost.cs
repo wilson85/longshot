@@ -117,6 +117,15 @@ public sealed class MatchHost : Component
     /// <summary>Tint applied to the cue stick. Default: light maple wood.</summary>
     [Property] public Color CueColor { get; set; } = new Color(0.82f, 0.65f, 0.42f);
 
+    /// <summary>Mouse sensitivity while in English mode (hold E). Fraction-of-ball-radius per pitch/yaw degree.</summary>
+    [Property, Range(0.005f, 0.1f)] public float EnglishSensitivity { get; set; } = 0.02f;
+
+    /// <summary>Mouse sensitivity for butt elevation (hold B). Degrees of cue tilt per pitch-degree of mouse.</summary>
+    [Property, Range(0.1f, 3f)] public float ElevationSensitivity { get; set; } = 0.6f;
+
+    /// <summary>Maximum cue elevation in degrees. 45° is a steep massé; 60°+ approaches jump-shot territory.</summary>
+    [Property, Range(5f, 75f)] public float MaxElevationDeg { get; set; } = 45f;
+
     // -------------------- Overhead view + table legs --------------------
 
     /// <summary>Height of the overhead camera above the slate (units) while RMB is held.</summary>
@@ -153,6 +162,16 @@ public sealed class MatchHost : Component
     private float _currentDrawbackUnits;
     /// <summary>Peak drawback reached during the current stroke. Force is computed from this on release.</summary>
     private float _peakDrawbackUnits;
+
+    // --- English (cue ball contact point) ---
+    /// <summary>Side English: fraction of ball radius. -0.5 = full left contact, +0.5 = full right contact.</summary>
+    private float _englishH;
+    /// <summary>Vertical English: fraction of ball radius. +0.5 = top english (follow), -0.5 = bottom english (draw).</summary>
+    private float _englishV;
+
+    // --- Butt elevation (massé / jump strike) ---
+    /// <summary>Cue elevation in degrees. 0 = horizontal, positive = butt raised / tip dipping toward ball top.</summary>
+    private float _buttElevDeg;
 
     // --- Replay state ---
     /// <summary>Ball-state snapshot captured immediately before the most recent <see cref="Strike"/>. Used by <see cref="Replay"/>.</summary>
@@ -325,6 +344,8 @@ public sealed class MatchHost : Component
         bool strokeButton  = Input.Down("Attack1") || Input.Keyboard.Down("s");       // LMB or S held → stroke
         bool strokeStart   = Input.Pressed("Attack1") || Input.Keyboard.Pressed("s");
         bool strokeEnd     = Input.Released("Attack1") || Input.Keyboard.Released("s");
+        bool englishMode   = Input.Keyboard.Down("e");                                // E held → adjust cue-ball contact point
+        bool elevationMode = Input.Keyboard.Down("b");                                // B held → tilt cue butt up
         bool replayPressed = Input.Keyboard.Pressed("r");                             // R key → replay last shot
 
         var look = Input.AnalogLook;                                                  // (pitch, yaw, roll) in degrees this frame
@@ -334,7 +355,7 @@ public sealed class MatchHost : Component
             Replay();
         }
 
-        // ---- Mode-driven input handling ----
+        // ---- Mode-driven input handling. Priority: stroke > english > elevation > free aim. ----
         if (_shotInFlight)
         {
             // Locked: balls are moving. No aim/stroke updates. Cue is hidden inside UpdateAimRig.
@@ -342,6 +363,19 @@ public sealed class MatchHost : Component
         else if (strokeButton)
         {
             HandleStrokeWhileHeld(look);
+        }
+        else if (englishMode)
+        {
+            // Mouse → cue contact point on the ball, in fractions of ball radius.
+            //  - Mouse right (yaw+)        → tip moves right on ball → _englishH +=
+            //  - Mouse up    (pitch < 0)   → tip moves up on ball    → _englishV +=
+            _englishH = MathX.Clamp(_englishH + look.yaw   * EnglishSensitivity, -0.5f, 0.5f);
+            _englishV = MathX.Clamp(_englishV - look.pitch * EnglishSensitivity, -0.5f, 0.5f);
+        }
+        else if (elevationMode)
+        {
+            // Mouse pitch → cue butt elevation. Mouse down (pitch+) raises the butt (steeper massé).
+            _buttElevDeg = MathX.Clamp(_buttElevDeg + look.pitch * ElevationSensitivity, 0f, MaxElevationDeg);
         }
         else
         {
@@ -436,13 +470,26 @@ public sealed class MatchHost : Component
                 // Drawback: at rest = CueDrawbackUnits; during a stroke = _currentDrawbackUnits.
                 float drawback = _stroking ? _currentDrawbackUnits : CueDrawbackUnits;
 
-                // Local +X points along aimDirWorld. Tip at +halfLen in local; place GameObject so the tip
-                // sits 'drawback' behind the cue ball (cue draws back from the ball during a stroke).
-                Vector3 tipTarget = cueBallWorld - aimDirWorld * drawback;
-                Vector3 cueCenter = tipTarget - aimDirWorld * (CueLengthUnits * 0.5f);
+                // Elevation: tilt the cue so its length axis points (aimDir * cos(elev) - up * sin(elev)),
+                // i.e. forward-and-down. Butt then ends up higher than tip; tip is closer to the ball.
+                float elevRad   = _buttElevDeg * (MathF.PI / 180f);
+                float cosE      = MathF.Cos(elevRad);
+                float sinE      = MathF.Sin(elevRad);
+                Vector3 cueAxis = (aimDirWorld * cosE - Vector3.Up * sinE).Normal;
+
+                // English: contact-point offset on the cue ball, expressed as fractions of ball radius.
+                // Perpendicular axes around the aim direction: right = aim × up (in XY plane), up = world up.
+                float ballRadiusUnits = Conversions.MetresToUnits(GameSettings.BallRadius);
+                Vector3 worldRight    = Vector3.Cross(aimDirWorld, Vector3.Up).Normal;
+                Vector3 tipOffset     = (worldRight * _englishH + Vector3.Up * _englishV) * ballRadiusUnits;
+
+                // Tip target: at the cue ball, displaced by the english offset, then pulled back by 'drawback'
+                // along the cue's local axis (so the cue length stays sensible regardless of elevation).
+                Vector3 tipTarget = cueBallWorld + tipOffset - cueAxis * drawback;
+                Vector3 cueCenter = tipTarget - cueAxis * (CueLengthUnits * 0.5f);
 
                 _cueStickGo.WorldPosition = cueCenter;
-                _cueStickGo.WorldRotation = Rotation.LookAt(aimDirWorld);
+                _cueStickGo.WorldRotation = Rotation.LookAt(cueAxis);
             }
         }
     }
@@ -699,23 +746,31 @@ public sealed class MatchHost : Component
         // World aim direction in s&box's XY plane, derived from current aim yaw.
         float yawRad = _aimYawDeg * (MathF.PI / 180f);
         Vector3 aimDirWorld = new Vector3(MathF.Cos(yawRad), MathF.Sin(yawRad), 0f);
-        SnVec3 aimDirEngine = Conversions.WorldToEngine(aimDirWorld);
-        aimDirEngine.Y = 0f;                                   // strip vertical — table-plane shot only
-        if (aimDirEngine.LengthSquared() > 1e-6f)
-        {
-            aimDirEngine = SnVec3.Normalize(aimDirEngine);
-        }
-        else
-        {
-            // Degenerate aim — fall back to engine +Z so we don't pass a zero vector to StrikeCueBall.
-            aimDirEngine = new SnVec3(0, 0, 1);
-        }
+
+        // Convert horizontal aim to engine coords (Y-up). Vertical component stripped, normalised.
+        SnVec3 horizAimEngine = Conversions.WorldToEngine(aimDirWorld);
+        horizAimEngine.Y = 0f;
+        if (horizAimEngine.LengthSquared() > 1e-6f) horizAimEngine = SnVec3.Normalize(horizAimEngine);
+        else horizAimEngine = new SnVec3(0, 0, 1);            // degenerate-aim fallback
+
+        // Apply elevation: tip down, butt up. Engine +Y = up, so the cue strikes the ball travelling
+        // (horizontalDir * cos(elev)) + (-Y * sin(elev)) — forward and downward.
+        float elevRad = _buttElevDeg * (MathF.PI / 180f);
+        SnVec3 aimDirEngine = horizAimEngine * MathF.Cos(elevRad) + new SnVec3(0, -MathF.Sin(elevRad), 0);
+        aimDirEngine = SnVec3.Normalize(aimDirEngine);
+
+        // English → hitOffset in engine local coords (relative to ball centre, in metres). The contact
+        // point on the cue ball is (englishH * right + englishV * up) × BallRadius. "right" is perpendicular
+        // to the horizontal aim, in the table plane.
+        SnVec3 engineUp     = new SnVec3(0, 1, 0);
+        SnVec3 engineRight  = SnVec3.Normalize(SnVec3.Cross(horizAimEngine, engineUp));
+        SnVec3 hitOffset    = (engineRight * _englishH + engineUp * _englishV) * GameSettings.BallRadius;
 
         _engine.StrikeCueBall(
             id: 0,
             aimDirection: aimDirEngine,
             force: force,
-            hitOffset: SnVec3.Zero);
+            hitOffset: hitOffset);
 
         _shotInFlight = true;
     }
