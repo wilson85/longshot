@@ -105,13 +105,17 @@ public sealed class MatchHost : Component
     [Property, Range(0f, 20f)] public float CueDrawbackUnits { get; set; } = 4f;
 
     /// <summary>Maximum drawback during a stroke (units). Caps the cue's visual pull-back and the resulting force.</summary>
-    [Property, Range(5f, 40f)] public float MaxDrawbackUnits { get; set; } = 18f;
+    [Property, Range(5f, 60f)] public float MaxDrawbackUnits { get; set; } = 30f;
 
-    /// <summary>Mouse sensitivity for the stroke gesture (units per pitch-degree of mouse motion).</summary>
-    [Property, Range(0.05f, 2f)] public float StrokeSensitivity { get; set; } = 0.35f;
+    /// <summary>
+    /// Mouse sensitivity for the stroke gesture, in <b>units of drawback per pixel of mouse-Y motion</b>.
+    /// 0.15 ≈ 1:1 feel at default camera distance (60u) and FOV (~60°) where 1 mouse pixel travels
+    /// approximately 1 screen pixel of cue motion. Pulling the mouse ~200 px fills the bar.
+    /// </summary>
+    [Property, Range(0.02f, 1f)] public float StrokeSensitivity { get; set; } = 0.15f;
 
     /// <summary>Multiplier from "draw distance above rest" (units) to cue strike force (N·s).</summary>
-    [Property, Range(0.05f, 1f)] public float StrokeForceScale { get; set; } = 0.18f;
+    [Property, Range(0.02f, 0.5f)] public float StrokeForceScale { get; set; } = 0.07f;
 
     /// <summary>Minimum extra draw beyond rest before a release counts as a real stroke (units). Below this, click is treated as a cancel.</summary>
     [Property, Range(0.5f, 5f)] public float StrokeFireThresholdUnits { get; set; } = 1.5f;
@@ -704,7 +708,9 @@ public sealed class MatchHost : Component
         }
         else if (strokeButton)
         {
-            HandleStrokeWhileHeld(look);
+            // Raw mouse delta in pixels — gives a 1:1 feel for the stroke gesture. AnalogLook would
+            // go through s&box's camera-sensitivity filter, which adds lag and shrinks the response.
+            HandleStrokeWhileHeld(Input.MouseDelta);
         }
         else if (englishMode)
         {
@@ -883,9 +889,15 @@ public sealed class MatchHost : Component
     }
 
     /// <summary>
-    /// While the stroke button is held: integrate vertical mouse motion into <see cref="_currentDrawbackUnits"/>.
-    /// Positive <c>look.pitch</c> = mouse pulled down = cue drawn back (drawback increases); negative pitch =
-    /// mouse pushed up = cue strokes forward (drawback decreases). Drawback is clamped to [0, <see cref="MaxDrawbackUnits"/>].
+    /// While the stroke button is held: integrate raw mouse-Y motion (pixels) directly into
+    /// <see cref="_currentDrawbackUnits"/>. Positive <paramref name="mouseDelta"/>.y = mouse moved down
+    /// = cue drawn back; negative = mouse moved up = cue strokes forward. Drawback is clamped to
+    /// [0, <see cref="MaxDrawbackUnits"/>].
+    /// <para>
+    /// Using <see cref="Input.MouseDelta"/> (pixels) rather than <see cref="Input.AnalogLook"/> (camera
+    /// degrees) gives a true 1:1 mouse feel — the cue tip moves the same amount each pixel of mouse
+    /// motion regardless of s&amp;box's camera sensitivity settings.
+    /// </para>
     /// <para>
     /// Fire condition (Shooters-Pool feel): the shot commits during the FORWARD STROKE the instant the cue
     /// tip reaches the cue ball — i.e. when <see cref="_currentDrawbackUnits"/> drops back to (or below) the
@@ -894,21 +906,21 @@ public sealed class MatchHost : Component
     /// the stroke.
     /// </para>
     /// </summary>
-    private void HandleStrokeWhileHeld(Angles look)
+    private void HandleStrokeWhileHeld(Vector2 mouseDelta)
     {
         if (_strokeFired) return;                                // already committed this stroke; wait for button release to start a new one
 
         _currentDrawbackUnits = MathX.Clamp(
-            _currentDrawbackUnits + look.pitch * StrokeSensitivity,
+            _currentDrawbackUnits + mouseDelta.y * StrokeSensitivity,
             0f, MaxDrawbackUnits);
         if (_currentDrawbackUnits > _peakDrawbackUnits) _peakDrawbackUnits = _currentDrawbackUnits;
 
         // Fire the moment the cue tip touches the ball during a forward stroke. "Forward stroke" means
-        // drawback is decreasing (mouse pushing up, look.pitch < 0). We also require a real pull-back
+        // drawback is decreasing (mouse pushing up, mouseDelta.y < 0). We also require a real pull-back
         // first so a single quick click without aiming doesn't fire a baseline-power shot.
         bool didPullBack    = _peakDrawbackUnits > CueDrawbackUnits + StrokeFireThresholdUnits;
         bool tipAtBall      = _currentDrawbackUnits <= CueDrawbackUnits;
-        bool pushingForward = look.pitch < 0f;
+        bool pushingForward = mouseDelta.y < 0f;
         if (didPullBack && tipAtBall && pushingForward)
         {
             float drawAboveRest = _peakDrawbackUnits - CueDrawbackUnits;
