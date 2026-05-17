@@ -624,6 +624,58 @@ public sealed class MatchHost : Component
         }
     }
 
+    /// <summary>
+    /// Draw the in-play HUD: current player + group, last shot, ball-in-hand flag, and a stroke-power bar
+    /// at the bottom of the screen while the player is actively pulling back. Uses
+    /// <see cref="Component.DebugOverlay"/> screen-space primitives — no Razor template, no extra
+    /// GameObjects, no asset wiring required for a first-light heads-up display.
+    /// </summary>
+    private void DrawHud()
+    {
+        if (_rules is null) return;
+
+        var overlay = DebugOverlay;
+        if (overlay is null) return;
+
+        // ---- Top-left: player + group info ----
+        string p1Group = _rules.Player1Group?.ToString() ?? "(unassigned)";
+        string p2Group = _rules.Player2Group?.ToString() ?? "(unassigned)";
+        string p1Label = _rules.CurrentPlayer == 1 ? "> P1" : "  P1";
+        string p2Label = _rules.CurrentPlayer == 2 ? "> P2" : "  P2";
+
+        var hudColour = Color.White;
+        overlay.ScreenText(new Vector2(20, 20),  $"{p1Label}  -  {p1Group}",                   size: 18, color: hudColour);
+        overlay.ScreenText(new Vector2(20, 44),  $"{p2Label}  -  {p2Group}",                   size: 18, color: hudColour);
+        overlay.ScreenText(new Vector2(20, 76),  $"Open table: {_rules.OpenTable}",            size: 14, color: hudColour);
+        overlay.ScreenText(new Vector2(20, 96),  $"Shot {_shotNumber}: {LastShotDescription}", size: 14, color: hudColour);
+
+        if (_rules.GameOver)
+        {
+            overlay.ScreenText(new Vector2(20, 124), $"GAME OVER  -  P{_rules.Winner} wins ({_rules.WinReason})", size: 20, color: new Color(1f, 0.9f, 0.3f));
+        }
+
+        // ---- Top-right: input mode hints ----
+        float w = Screen.Width;
+        overlay.ScreenText(new Vector2(w - 280, 20),  "LMB / S    pull back, push forward", size: 14, color: hudColour);
+        overlay.ScreenText(new Vector2(w - 280, 40),  "E + mouse   english (cue contact)",  size: 14, color: hudColour);
+        overlay.ScreenText(new Vector2(w - 280, 60),  "B + mouse   butt elevation",          size: 14, color: hudColour);
+        overlay.ScreenText(new Vector2(w - 280, 80),  "RMB         overhead view",           size: 14, color: hudColour);
+        overlay.ScreenText(new Vector2(w - 280, 100), "R           replay last shot",        size: 14, color: hudColour);
+
+        // ---- Bottom-centre: stroke power bar while pulling back ----
+        if (_stroking && _peakDrawbackUnits > CueDrawbackUnits + 0.1f)
+        {
+            float h = Screen.Height;
+            float fillFraction = MathX.Clamp(
+                (_peakDrawbackUnits - CueDrawbackUnits) / MathF.Max(1e-3f, MaxDrawbackUnits - CueDrawbackUnits),
+                0f, 1f);
+            int filledBlocks = (int)MathF.Round(fillFraction * 20f);
+            string bar = new string('|', filledBlocks).PadRight(20, '.');
+            int powerPct = (int)MathF.Round(fillFraction * 100f);
+            overlay.ScreenText(new Vector2(w * 0.5f - 100f, h - 50f), $"[{bar}] {powerPct,3}%", size: 20, color: new Color(1f, 0.55f, 0.15f));
+        }
+    }
+
     /// <summary>Mirror engine state to GameObject transforms every frame for smooth visuals.</summary>
     protected override void OnUpdate()
     {
@@ -685,6 +737,7 @@ public sealed class MatchHost : Component
         }
 
         UpdateAimRig(overheadView);
+        DrawHud();
 
         var balls = _engine.PhysicsStates;
         for (int i = 0; i < balls.Length && i < _ballObjects.Count; i++)
