@@ -1,5 +1,7 @@
 using System;
 using LongShot.Engine;
+using LongShot.Rules;
+using LongShot.Shot;
 using SnVec3 = System.Numerics.Vector3;
 
 namespace Longshot;
@@ -88,9 +90,25 @@ public sealed class MatchHost : Component
     private readonly List<GameObject> _ballObjects = new();
     private readonly List<GameObject> _tableObjects = new();
 
+    // --- Rules + per-shot lifecycle ---
+    private EightBallRules _rules;
+    private ShotRecorder _recorder;
+    private bool _shotInFlight;
+    private int _shotNumber;
+
+    /// <summary>Read-only view of the 8-ball rules state for the inspector / external observers.</summary>
+    public int CurrentPlayer => _rules?.CurrentPlayer ?? 1;
+    public bool OpenTable => _rules?.OpenTable ?? true;
+    public string Player1Group => _rules?.Player1Group?.ToString() ?? "(unassigned)";
+    public string Player2Group => _rules?.Player2Group?.ToString() ?? "(unassigned)";
+    public bool GameOver => _rules?.GameOver ?? false;
+    public int Winner => _rules?.Winner ?? 0;
+    public string LastShotDescription => _rules?.LastShot?.Description ?? "(no shots yet)";
+
     protected override void OnStart()
     {
         _engine = new BilliardsEngine(seed: 1);
+        _rules = new EightBallRules();
 
         var def = TableDefinition.BuildWpaStandard();
         var (rails, pockets) = TableBuilder.Build(def);
@@ -101,10 +119,11 @@ public sealed class MatchHost : Component
             BuildTableVisuals(def, rails, pockets);
         }
 
-        // First-light minimum: cue ball + one object ball directly ahead.
-        // Engine coordinates: Y-up, metres. Ball centre rests at Y = BallRadius (slate at Y=0).
+        // First-light rack: cue (id 0) + one solid (id 1). Enough to test the open-table →
+        // group-assignment path. Full 16-ball rack is a follow-up — for now we only need
+        // enough balls to verify the per-shot lifecycle wiring works.
         _engine.AddBall(new SnVec3(0, GameSettings.BallRadius, -0.8f), BallType.Cue);
-        _engine.AddBall(new SnVec3(0, GameSettings.BallRadius, 0.8f), BallType.Normal);
+        _engine.AddBall(new SnVec3(0, GameSettings.BallRadius,  0.8f), BallType.Normal);
 
         float diameterUnits = Conversions.MetresToUnits(GameSettings.BallRadius * 2f);
         var sphereFallback = SphereModel ?? Model.Load("models/dev/sphere.vmdl");
@@ -145,11 +164,21 @@ public sealed class MatchHost : Component
         }
     }
 
-    /// <summary>Drive the deterministic physics on the fixed tick.</summary>
+    /// <summary>
+    /// Drive the deterministic physics on the fixed tick, and detect end-of-shot to close out
+    /// the rules observer + ShotRecorder lifecycle.
+    /// </summary>
     protected override void OnFixedUpdate()
     {
         if (_engine is null) return;
         _engine.Tick(Time.Delta);
+        _recorder?.Sample();
+
+        // If a shot is in flight and all balls have settled, evaluate the shot through the rules.
+        if (_shotInFlight && _engine.AreAllBallsAsleep())
+        {
+            FinishShot();
+        }
     }
 
     /// <summary>Mirror engine state to GameObject transforms every frame for smooth visuals.</summary>
@@ -282,15 +311,67 @@ public sealed class MatchHost : Component
         Log.Info($"{nameof(MatchHost)}.BuildTableVisuals: spawned {_tableObjects.Count} table GameObjects under {GameObject.Name}.");
     }
 
-    /// <summary>Strikes the cue ball forward (+Z in engine space) with the configured force.</summary>
+    /// <summary>
+    /// Strikes the cue ball forward (+Z in engine space) with the configured force. Wraps the
+    /// strike with a fresh <see cref="ShotRecorder"/> + <see cref="EightBallRules.OnShotStart"/>
+    /// so the rules observer sees the per-shot lifecycle. Ignored if a shot is already in flight
+    /// or the game's over.
+    /// </summary>
     public void Strike()
     {
-        if (_engine is null) return;
+        // EightBallRules integration: per-shot lifecycle via ShotRecorder.
+        if (_engine is null || _rules is null) return;
+        if (_shotInFlight) return;             // already simulating a shot
+        if (_rules.GameOver) return;           // game's done
+
+        _shotNumber++;
+        _recorder = new ShotRecorder(_engine);
+        _rules.OnShotStart(new ShotContext
+        {
+            ShotNumber = _shotNumber,
+            StateAtStart = _engine.SnapshotState(),
+        });
+
         _engine.StrikeCueBall(
             id: 0,
             aimDirection: new SnVec3(0, 0, 1),
             force: StrikeForce,
             hitOffset: SnVec3.Zero);
+
+        _shotInFlight = true;
+    }
+
+    /// <summary>
+    /// Called from <see cref="OnFixedUpdate"/> when <see cref="BilliardsEngine.AreAllBallsAsleep"/>
+    /// reports the shot has settled. Finalises the recorder, runs the rules observer, logs the
+    /// outcome, and resets the per-shot state so the next <see cref="Strike"/> can fire.
+    /// </summary>
+    private void FinishShot()
+    {
+        var summary = _recorder.Finalize();
+        _rules.OnShotEnd(summary);
+        _recorder.Dispose();
+        _recorder = null;
+        _shotInFlight = false;
+
+        var shot = _rules.LastShot;
+        if (shot is null)
+        {
+            Log.Info($"Shot {_shotNumber}: rules produced no result.");
+            return;
+        }
+
+        string p1 = _rules.Player1Group?.ToString() ?? "-";
+        string p2 = _rules.Player2Group?.ToString() ?? "-";
+        Log.Info(
+            $"Shot {_shotNumber} P{shot.Player}: {shot.Description}. "
+            + $"Turn → P{_rules.CurrentPlayer}, OpenTable={_rules.OpenTable}, "
+            + $"P1={p1}, P2={p2}, BallInHand={shot.BallInHand}");
+
+        if (_rules.GameOver)
+        {
+            Log.Info($"GAME OVER. Winner: P{_rules.Winner}. Reason: {_rules.WinReason}");
+        }
     }
 
     /// <summary>
