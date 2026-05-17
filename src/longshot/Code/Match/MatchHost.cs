@@ -114,8 +114,20 @@ public sealed class MatchHost : Component
     /// </summary>
     [Property, Range(0.02f, 1f)] public float StrokeSensitivity { get; set; } = 0.15f;
 
-    /// <summary>Multiplier from "draw distance above rest" (units) to cue strike force (N·s).</summary>
-    [Property, Range(0.02f, 0.5f)] public float StrokeForceScale { get; set; } = 0.07f;
+    /// <summary>
+    /// Cue speed (m/s) that maps to 100% power. The cue's forward velocity at impact is converted
+    /// directly to ball impulse via <c>force = velocity × BallMass</c>; capping at this speed
+    /// prevents accidentally hard pushes from launching the ball off the table. Real-world break
+    /// strokes are ~7–9 m/s at the cue tip; 9 m/s is a comfortable ceiling.
+    /// </summary>
+    [Property, Range(2f, 12f)] public float MaxStrikeSpeedMPS { get; set; } = 9f;
+
+    /// <summary>
+    /// Power ceiling as a percentage of <see cref="MaxStrikeSpeedMPS"/>. The cue's velocity at impact
+    /// is clamped to <c>MaxStrikeSpeedMPS × PowerLimitPercent / 100</c>. Drop this for finesse-only
+    /// play (e.g. 50% disables hard breaks); keep at 100% for full range including breaks.
+    /// </summary>
+    [Property, Range(10f, 100f)] public float PowerLimitPercent { get; set; } = 100f;
 
     /// <summary>Minimum extra draw beyond rest before a release counts as a real stroke (units). Below this, click is treated as a cancel.</summary>
     [Property, Range(0.5f, 5f)] public float StrokeFireThresholdUnits { get; set; } = 1.5f;
@@ -206,6 +218,10 @@ public sealed class MatchHost : Component
     private float _peakDrawbackUnits;
     /// <summary>True once the cue tip reached the ball during the push phase and the shot fired. Prevents re-fire while button stays held.</summary>
     private bool _strokeFired;
+    /// <summary>Smoothed cue forward velocity (units/sec) during the push phase. Positive when pushing toward the ball; sampled at impact for force.</summary>
+    private float _pushVelocityUnitsPerSec;
+    /// <summary>The actual % of MaxStrikeSpeedMPS used by the most recent strike, for HUD display.</summary>
+    private float _lastStrikePowerPercent;
 
     // --- English (cue ball contact point) ---
     /// <summary>Side English: fraction of ball radius. -0.5 = full left contact, +0.5 = full right contact.</summary>
@@ -666,17 +682,46 @@ public sealed class MatchHost : Component
         overlay.ScreenText(new Vector2(w - 280, 80),  "RMB         overhead view",           size: 14, color: hudColour);
         overlay.ScreenText(new Vector2(w - 280, 100), "R           replay last shot",        size: 14, color: hudColour);
 
-        // ---- Bottom-centre: stroke power bar while pulling back ----
+        // ---- Bottom-centre: power readouts ----
+        // While stroking: two readouts side-by-side — "draw" (how far we've pulled back) on the left,
+        // "push" (live forward speed as % of MaxStrikeSpeedMPS, capped by PowerLimitPercent) on the right.
+        // After a shot: the actual % used at impact (until the next stroke begins).
         if (_stroking && _peakDrawbackUnits > CueDrawbackUnits + 0.1f)
         {
             float h = Screen.Height;
-            float fillFraction = MathX.Clamp(
+
+            float drawFraction = MathX.Clamp(
                 (_peakDrawbackUnits - CueDrawbackUnits) / MathF.Max(1e-3f, MaxDrawbackUnits - CueDrawbackUnits),
                 0f, 1f);
-            int filledBlocks = (int)MathF.Round(fillFraction * 20f);
-            string bar = new string('|', filledBlocks).PadRight(20, '.');
-            int powerPct = (int)MathF.Round(fillFraction * 100f);
-            overlay.ScreenText(new Vector2(w * 0.5f - 100f, h - 50f), $"[{bar}] {powerPct,3}%", size: 20, color: new Color(1f, 0.55f, 0.15f));
+            int drawBlocks = (int)MathF.Round(drawFraction * 16f);
+            string drawBar = new string('|', drawBlocks).PadRight(16, '.');
+
+            float pushVelMPS    = MathF.Max(0f, _pushVelocityUnitsPerSec) / Conversions.UnitsPerMetre;
+            float maxAllowedMPS = MaxStrikeSpeedMPS * (PowerLimitPercent * 0.01f);
+            float pushFraction  = MathX.Clamp(pushVelMPS / MathF.Max(0.01f, MaxStrikeSpeedMPS), 0f, 1f);
+            float capFraction   = PowerLimitPercent * 0.01f;
+            int pushBlocks      = (int)MathF.Round(pushFraction * 16f);
+            int capBlocks       = (int)MathF.Round(capFraction * 16f);
+            // Show the cap as '|' filled blocks where the live push velocity falls, '·' for empty bar slots
+            // up to the cap, and '-' for the locked-out range above the cap.
+            var pushBar = new System.Text.StringBuilder(16);
+            for (int i = 0; i < 16; i++)
+            {
+                if (i < pushBlocks) pushBar.Append('|');
+                else if (i < capBlocks) pushBar.Append('.');
+                else pushBar.Append('-');
+            }
+            int pushPct = (int)MathF.Round(MathF.Min(pushVelMPS, maxAllowedMPS) / MathF.Max(0.01f, MaxStrikeSpeedMPS) * 100f);
+
+            overlay.ScreenText(new Vector2(w * 0.5f - 220f, h - 50f), $"draw [{drawBar}]",                size: 18, color: new Color(0.85f, 0.85f, 0.85f));
+            overlay.ScreenText(new Vector2(w * 0.5f + 10f,  h - 50f), $"push [{pushBar}] {pushPct,3}%",   size: 18, color: new Color(1f, 0.55f, 0.15f));
+        }
+        else if (_lastStrikePowerPercent > 0.1f && !_shotInFlight)
+        {
+            float h = Screen.Height;
+            overlay.ScreenText(new Vector2(w * 0.5f - 90f, h - 50f),
+                $"last strike: {_lastStrikePowerPercent:0.}%  ({_lastStrikePowerPercent * MaxStrikeSpeedMPS * 0.01f:0.0} m/s)",
+                size: 14, color: new Color(0.7f, 0.7f, 0.7f));
         }
     }
 
@@ -882,10 +927,11 @@ public sealed class MatchHost : Component
     /// <summary>Begin a new stroke gesture. Captures the current drawback baseline and resets the peak tracker.</summary>
     private void BeginStroke()
     {
-        _stroking             = true;
-        _strokeFired          = false;
-        _currentDrawbackUnits = CueDrawbackUnits;
-        _peakDrawbackUnits    = CueDrawbackUnits;
+        _stroking                = true;
+        _strokeFired             = false;
+        _currentDrawbackUnits    = CueDrawbackUnits;
+        _peakDrawbackUnits       = CueDrawbackUnits;
+        _pushVelocityUnitsPerSec = 0f;
     }
 
     /// <summary>
@@ -910,21 +956,33 @@ public sealed class MatchHost : Component
     {
         if (_strokeFired) return;                                // already committed this stroke; wait for button release to start a new one
 
-        _currentDrawbackUnits = MathX.Clamp(
-            _currentDrawbackUnits + mouseDelta.y * StrokeSensitivity,
-            0f, MaxDrawbackUnits);
+        float dt = Time.Delta;
+        if (dt < 1e-5f) return;                                  // skip degenerate frames
+
+        float drawbackDeltaUnits = mouseDelta.y * StrokeSensitivity;
+        _currentDrawbackUnits = MathX.Clamp(_currentDrawbackUnits + drawbackDeltaUnits, 0f, MaxDrawbackUnits);
         if (_currentDrawbackUnits > _peakDrawbackUnits) _peakDrawbackUnits = _currentDrawbackUnits;
 
-        // Fire the moment the cue tip touches the ball during a forward stroke. "Forward stroke" means
-        // drawback is decreasing (mouse pushing up, mouseDelta.y < 0). We also require a real pull-back
-        // first so a single quick click without aiming doesn't fire a baseline-power shot.
+        // Track cue forward velocity (units/sec). Drawback DECREASING = pushing forward → positive velocity.
+        // EMA-smooth a couple of frames so a single noisy dt or mouseDelta doesn't dominate the impact reading.
+        float pushVelThisFrame = -drawbackDeltaUnits / dt;
+        const float ema = 0.55f;
+        _pushVelocityUnitsPerSec = MathX.Lerp(_pushVelocityUnitsPerSec, pushVelThisFrame, ema);
+
+        // Fire the moment the cue tip touches the ball during a forward stroke.
         bool didPullBack    = _peakDrawbackUnits > CueDrawbackUnits + StrokeFireThresholdUnits;
         bool tipAtBall      = _currentDrawbackUnits <= CueDrawbackUnits;
         bool pushingForward = mouseDelta.y < 0f;
         if (didPullBack && tipAtBall && pushingForward)
         {
-            float drawAboveRest = _peakDrawbackUnits - CueDrawbackUnits;
-            float force         = drawAboveRest * StrokeForceScale;
+            // Force from velocity at impact: f = m·v (impulse). Convert units/sec → m/s first, then cap.
+            float velMPS         = MathF.Max(0f, _pushVelocityUnitsPerSec) / Conversions.UnitsPerMetre;
+            float maxAllowedMPS  = MaxStrikeSpeedMPS * (PowerLimitPercent * 0.01f);
+            float clampedMPS     = MathF.Min(velMPS, maxAllowedMPS);
+            float force          = clampedMPS * GameSettings.BallMass;
+
+            _lastStrikePowerPercent = (clampedMPS / MathF.Max(0.01f, MaxStrikeSpeedMPS)) * 100f;
+
             Strike(force);
             _strokeFired          = true;
             _currentDrawbackUnits = CueDrawbackUnits;            // park visual at rest; cue is hidden during shot anyway
