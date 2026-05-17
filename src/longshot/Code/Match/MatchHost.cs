@@ -162,6 +162,23 @@ public sealed class MatchHost : Component
     /// <summary>If true, MatchHost loads built-in s&amp;box physics SoundFiles and plays them on engine events.</summary>
     [Property] public bool EnableSound { get; set; } = true;
 
+    // -------------------- Aim line (ghost-ball predictor) --------------------
+
+    /// <summary>If true, an aim-line mesh is drawn on the slate from the cue ball to the predicted first contact each frame.</summary>
+    [Property] public bool ShowAimLine { get; set; } = true;
+
+    /// <summary>Visible width of the aim line (units). 0.3u ≈ 7.6 mm — narrow enough to read as a guide line.</summary>
+    [Property, Range(0.05f, 1f)] public float AimLineWidthUnits { get; set; } = 0.3f;
+
+    /// <summary>Visible thickness (Z extent) of the aim line so it doesn't z-fight the slate. 0.05u ≈ 1.3 mm.</summary>
+    [Property, Range(0.02f, 0.5f)] public float AimLineHeightUnits { get; set; } = 0.05f;
+
+    /// <summary>Maximum aim-line length when no contact is predicted within range (units).</summary>
+    [Property, Range(20f, 300f)] public float AimLineMaxLengthUnits { get; set; } = 200f;
+
+    /// <summary>Tint applied to the aim-line ModelRenderer.</summary>
+    [Property] public Color AimLineColor { get; set; } = new Color(1f, 1f, 1f);
+
     private BilliardsEngine _engine;
     private readonly List<GameObject> _ballObjects = new();
     private readonly List<GameObject> _tableObjects = new();
@@ -173,6 +190,8 @@ public sealed class MatchHost : Component
     private float _aimPitchDeg;
     /// <summary>Spawned in OnStart, transformed every frame. Local +X is the cue's length axis (tip at +X).</summary>
     private GameObject _cueStickGo;
+    /// <summary>Aim-line mesh: unit-length flat box along local +X, scaled to predicted first-contact distance each frame.</summary>
+    private GameObject _aimLineGo;
 
     // --- Stroke state (Shooters-Pool-style: hold LMB or S, pull back, fire on contact during push) ---
     /// <summary>True while the stroke button (LMB or S) is held.</summary>
@@ -282,6 +301,7 @@ public sealed class MatchHost : Component
         DiscoverViewCameraIfNeeded();                        // find the scene's main camera if not assigned in inspector
         DisableFreeCamIfAny();
         SpawnCueStick();
+        if (ShowAimLine) SpawnAimLine();
         UpdateAimRig();                                      // first-frame placement so the camera/cue aren't at origin
 
         if (AutoStrikeOnStart)
@@ -309,6 +329,63 @@ public sealed class MatchHost : Component
         var mr = _cueStickGo.AddComponent<ModelRenderer>();
         mr.Model = cueModel;
         mr.Tint = CueColor;
+    }
+
+    /// <summary>
+    /// Build a 1-unit-long flat-strip mesh for the aim line, spawned as a GameObject the per-frame
+    /// <see cref="UpdateAimRig"/> rescales (along local X) and orients to point from the cue ball to
+    /// the predicted first contact.
+    /// </summary>
+    private void SpawnAimLine()
+    {
+        var material = Material.Load("materials/default.vmat");
+        var model = ProceduralMeshes.BuildBox(
+            new Vector3(0.5f, AimLineWidthUnits * 0.5f, AimLineHeightUnits * 0.5f),
+            material);
+
+        _aimLineGo = Scene.CreateObject(true);
+        _aimLineGo.Name = "AimLine";
+        var mr = _aimLineGo.AddComponent<ModelRenderer>();
+        mr.Model = model;
+        mr.Tint  = AimLineColor;
+    }
+
+    /// <summary>
+    /// Predict how far the cue ball would travel along <paramref name="aimDirEngine"/> before its first
+    /// contact (another ball or a cushion segment). Treats the cue ball as a virtual moving ball with
+    /// 1 m/s along the aim direction so the returned time-of-impact is numerically equal to the
+    /// distance in metres. Returns <see cref="float.PositiveInfinity"/> if no contact is found.
+    /// </summary>
+    private float PredictFirstContactDistanceMetres(SnVec3 aimDirEngine)
+    {
+        if (_engine is null || _engine.PhysicsStates.Length == 0) return float.PositiveInfinity;
+
+        var states = _engine.PhysicsStates;
+        if (states[0].State == MotionState.Pocketed) return float.PositiveInfinity;
+
+        // Virtual moving cue ball at 1 m/s along the aim direction.
+        BallState virtualCue = states[0];
+        virtualCue.LinearVelocity = aimDirEngine;
+
+        float minT = float.PositiveInfinity;
+
+        // Ball-ball contacts (skip the cue itself and any pocketed balls).
+        for (int i = 1; i < states.Length; i++)
+        {
+            if (states[i].State == MotionState.Pocketed) continue;
+            float t = CollisionDetection.CalculateBallBallImpactTime(in virtualCue, in states[i]);
+            if (t < minT) minT = t;
+        }
+
+        // Cushion segments.
+        var rails = _engine.TableLayout.Rails;
+        for (int r = 0; r < rails.Length; r++)
+        {
+            float t = CollisionDetection.CalculateBallSegmentImpactTime(in virtualCue, in rails[r]);
+            if (t > 0f && t < minT) minT = t;
+        }
+
+        return minT;
     }
 
     /// <summary>
@@ -670,6 +747,42 @@ public sealed class MatchHost : Component
                 camPos = cueBallWorld - aimDirWorld * horiz + new Vector3(0, 0, vert);
                 ViewCamera.GameObject.WorldPosition = camPos;
                 ViewCamera.GameObject.WorldRotation = Rotation.LookAt((cueBallWorld - camPos).Normal);
+            }
+        }
+
+        // -------- Aim line: cue ball → predicted first contact --------
+        if (_aimLineGo.IsValid())
+        {
+            bool aimLineVisible = ShowAimLine && !_shotInFlight;
+            _aimLineGo.Enabled = aimLineVisible;
+
+            if (aimLineVisible)
+            {
+                // Build the engine-space aim direction the same way Strike() does (table-plane horizontal,
+                // ignoring butt elevation — the aim line shows where the cue ball will TRAVEL on the cloth).
+                SnVec3 horizAimEngine = Conversions.WorldToEngine(aimDirWorld);
+                horizAimEngine.Y = 0f;
+                if (horizAimEngine.LengthSquared() > 1e-6f) horizAimEngine = SnVec3.Normalize(horizAimEngine);
+                else horizAimEngine = new SnVec3(0, 0, 1);
+
+                float distMetres = PredictFirstContactDistanceMetres(horizAimEngine);
+                float distUnits;
+                if (!float.IsFinite(distMetres) || distMetres < 0.01f)
+                {
+                    distUnits = AimLineMaxLengthUnits;
+                }
+                else
+                {
+                    distUnits = MathF.Min(Conversions.MetresToUnits(distMetres), AimLineMaxLengthUnits);
+                }
+
+                _aimLineGo.LocalScale  = new Vector3(distUnits, 1f, 1f);
+                // Centre of the line sits halfway between the cue ball and the predicted contact, lifted
+                // just barely off the slate so the strip doesn't z-fight the cloth.
+                Vector3 lineCentre = cueBallWorld + aimDirWorld * (distUnits * 0.5f);
+                lineCentre.z = AimLineHeightUnits * 0.5f + 0.01f;       // hover just above slate top (Z=0)
+                _aimLineGo.WorldPosition = lineCentre;
+                _aimLineGo.WorldRotation = Rotation.LookAt(aimDirWorld);
             }
         }
 
