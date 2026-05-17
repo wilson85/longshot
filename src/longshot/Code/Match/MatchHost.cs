@@ -208,6 +208,20 @@ public sealed class MatchHost : Component
     /// <summary>If true, MatchHost loads built-in s&amp;box physics SoundFiles and plays them on engine events.</summary>
     [Property] public bool EnableSound { get; set; } = true;
 
+    // -------------------- Shot recording (camera → mp4) --------------------
+
+    /// <summary>Video frame width (px). Higher = better quality but bigger file + heavier encode cost.</summary>
+    [Property, Range(320f, 1920f)] public int VideoWidth { get; set; } = 1280;
+
+    /// <summary>Video frame height (px).</summary>
+    [Property, Range(240f, 1080f)] public int VideoHeight { get; set; } = 720;
+
+    /// <summary>Recording frame rate. 30 fps is the standard sweet spot; 60 is smoother but doubles file size.</summary>
+    [Property, Range(15f, 60f)] public int VideoFps { get; set; } = 30;
+
+    /// <summary>Average bitrate target (bits/sec). 4 Mbps ≈ "good quality" for 720p30.</summary>
+    [Property, Range(1_000_000f, 16_000_000f)] public int VideoBitrate { get; set; } = 4_000_000;
+
     // -------------------- Aim line (ghost-ball predictor) --------------------
 
     /// <summary>If true, an aim-line mesh is drawn on the slate from the cue ball to the predicted first contact each frame.</summary>
@@ -252,6 +266,24 @@ public sealed class MatchHost : Component
     private float _pushVelocityUnitsPerSec;
     /// <summary>The actual % of MaxStrikeSpeedMPS used by the most recent strike, for HUD display.</summary>
     private float _lastStrikePowerPercent;
+
+    // --- Recording state (PNG-sequence approach: dumps frames to FileSystem.Data and prints an
+    // ffmpeg command for the user to assemble into a video. Sandbox.VideoWriter is editor-only
+    // and not reachable from the game-side compile, hence the PNG fallback.) ---
+    /// <summary>True when F9 has been pressed and we're waiting for a strike to begin recording.</summary>
+    private bool _recordPending;
+    /// <summary>True while a video is being captured frame-by-frame.</summary>
+    private bool _recording;
+    /// <summary>Re-used bitmap buffer for camera → frame capture. Allocated once at recording start.</summary>
+    private Bitmap _captureBitmap;
+    /// <summary>Wall-clock time the current recording started (Time.Now snapshot). Used to compute per-frame timestamps.</summary>
+    private float _recordStartTime;
+    /// <summary>Next Time.Now value at which a frame should be captured (paces recording to <see cref="VideoFps"/>).</summary>
+    private float _nextCaptureTime;
+    /// <summary>Frame counter for the in-progress recording — increments per saved PNG.</summary>
+    private int _frameIdx;
+    /// <summary>Relative folder of the in-progress / last-finished recording (under <c>FileSystem.Data</c>).</summary>
+    private string _currentRecordingDir;
 
     // --- English (cue ball contact point) ---
     /// <summary>Side English: fraction of ball radius. -0.5 = full left contact, +0.5 = full right contact.</summary>
@@ -752,6 +784,108 @@ public sealed class MatchHost : Component
     }
 
     /// <summary>
+    /// F9 handler. State machine:
+    /// <list type="bullet">
+    ///   <item>currently recording → stop and finalise the file;</item>
+    ///   <item>currently armed → disarm (cancel without recording);</item>
+    ///   <item>idle → arm (next <see cref="Strike(float)"/> will start a recording, which auto-stops in <see cref="FinishShot"/>).</item>
+    /// </list>
+    /// </summary>
+    private void HandleRecordingToggle()
+    {
+        if (_recording)
+        {
+            StopRecording();
+        }
+        else if (_recordPending)
+        {
+            _recordPending = false;
+            Log.Info($"{nameof(MatchHost)}: recording disarmed.");
+        }
+        else
+        {
+            _recordPending = true;
+            Log.Info($"{nameof(MatchHost)}: recording ARMED — press F9 again to cancel, or strike to start.");
+        }
+    }
+
+    /// <summary>
+    /// Allocate the capture bitmap and pick a fresh timestamped folder. Called from
+    /// <see cref="Strike(float)"/> when <see cref="_recordPending"/> is set. Failure is caught + logged so
+    /// a recording problem can't break gameplay. Frames are written as <c>frame_NNNN.png</c> under
+    /// <c>recordings/longshot_yyyyMMdd_HHmmss/</c> in the game's writable data filesystem
+    /// (<see cref="FileSystem.Data"/>).
+    /// </summary>
+    private void StartRecording()
+    {
+        try
+        {
+            string ts = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            _currentRecordingDir = $"recordings/longshot_{ts}";
+
+            _captureBitmap   = new Bitmap(VideoWidth, VideoHeight);
+            _recording       = true;
+            _recordStartTime = Time.Now;
+            _nextCaptureTime = Time.Now;
+            _frameIdx        = 0;
+
+            string fullPath = FileSystem.Data?.GetFullPath(_currentRecordingDir) ?? _currentRecordingDir;
+            Log.Info($"{nameof(MatchHost)}: recording → {fullPath}/frame_*.png ({VideoWidth}×{VideoHeight} @ {VideoFps}fps)");
+        }
+        catch (System.Exception e)
+        {
+            Log.Warning($"{nameof(MatchHost)}: failed to start recording: {e.Message}");
+            _captureBitmap = null;
+            _recording     = false;
+        }
+    }
+
+    /// <summary>
+    /// Render the view camera to the capture bitmap and append it as a numbered PNG frame. Paced to
+    /// <see cref="VideoFps"/>; called every <see cref="OnUpdate"/> while <see cref="_recording"/> is true.
+    /// PNG encoding + filesystem write are synchronous; at 720p30 this typically costs &lt; 5 ms / frame.
+    /// </summary>
+    private void CaptureFrameIfDue()
+    {
+        if (!_recording) return;
+        if (Time.Now < _nextCaptureTime) return;
+        if (!ViewCamera.IsValid() || _captureBitmap is null || FileSystem.Data is null) return;
+
+        try
+        {
+            ViewCamera.RenderToBitmap(_captureBitmap);
+            byte[] png = _captureBitmap.ToPng();
+            string framePath = $"{_currentRecordingDir}/frame_{_frameIdx:D4}.png";
+            FileSystem.Data.WriteAllBytes(framePath, png);
+            _frameIdx++;
+        }
+        catch (System.Exception e)
+        {
+            Log.Warning($"{nameof(MatchHost)}: frame capture failed: {e.Message}");
+        }
+
+        _nextCaptureTime += 1f / MathF.Max(1, VideoFps);
+        // If we fell behind (long frame), skip-forward to "now" rather than spamming back-to-back captures.
+        if (_nextCaptureTime < Time.Now) _nextCaptureTime = Time.Now;
+    }
+
+    /// <summary>
+    /// Finalise the current recording: log the on-disk folder + an ffmpeg command-line for the user to
+    /// stitch the PNG sequence into a video file.
+    /// </summary>
+    private void StopRecording()
+    {
+        if (!_recording) return;
+
+        string fullPath = FileSystem.Data?.GetFullPath(_currentRecordingDir) ?? _currentRecordingDir;
+        Log.Info($"{nameof(MatchHost)}: recording stopped — {_frameIdx} frames captured in {fullPath}");
+        Log.Info($"  Stitch to mp4:  ffmpeg -framerate {VideoFps} -i \"{fullPath}/frame_%04d.png\" -c:v libx264 -pix_fmt yuv420p \"{fullPath}.mp4\"");
+
+        _captureBitmap = null;
+        _recording     = false;
+    }
+
+    /// <summary>
     /// Drive the deterministic physics on the fixed tick, and detect end-of-shot to close out
     /// the rules observer + ShotRecorder lifecycle.
     /// </summary>
@@ -806,6 +940,21 @@ public sealed class MatchHost : Component
         overlay.ScreenText(new Vector2(w - 280, 80),  "RMB         overhead view",           size: 14, color: hudColour);
         overlay.ScreenText(new Vector2(w - 280, 100), "R           replay last shot",        size: 14, color: hudColour);
         overlay.ScreenText(new Vector2(w - 280, 120), $"+ / -       sensitivity {StrokeSensitivity:0.0000}  (hold Shift for fine)", size: 14, color: new Color(0.85f, 0.85f, 0.55f));
+
+        // Recording state indicator (top-right, distinct colour).
+        if (_recording)
+        {
+            float elapsed = Time.Now - _recordStartTime;
+            overlay.ScreenText(new Vector2(w - 280, 144), $"● REC  {elapsed:0.0}s   {VideoWidth}×{VideoHeight}@{VideoFps}fps", size: 14, color: new Color(1f, 0.25f, 0.25f));
+        }
+        else if (_recordPending)
+        {
+            overlay.ScreenText(new Vector2(w - 280, 144), "F9          recording ARMED (next shot)", size: 14, color: new Color(1f, 0.65f, 0.25f));
+        }
+        else
+        {
+            overlay.ScreenText(new Vector2(w - 280, 144), "F9          record next shot", size: 14, color: hudColour);
+        }
 
         // ---- Bottom-centre: power readouts ----
         // While stroking: two readouts side-by-side — "draw" (how far we've pulled back) on the left,
@@ -871,6 +1020,9 @@ public sealed class MatchHost : Component
             Replay();
         }
 
+        // -- Shot recording: F9 toggles arm/cancel/stop. --
+        if (Input.Keyboard.Pressed("f9")) HandleRecordingToggle();
+
         // -- Sensitivity adjust (+ / -). Persists to Game.Cookies on every change. --
         // The '+' key requires shift on most keyboards, so we accept '=' as the bare-key alternative.
         // Holding Shift uses the finer step for precise tuning at low sensitivities.
@@ -920,6 +1072,7 @@ public sealed class MatchHost : Component
         }
 
         UpdateAimRig(overheadView);
+        CaptureFrameIfDue();
         DrawHud();
 
         var balls = _engine.PhysicsStates;
@@ -1333,6 +1486,13 @@ public sealed class MatchHost : Component
         // Capture pre-strike snapshot for Replay before anything mutates the engine.
         _replaySnapshot = _engine.SnapshotState();
 
+        // If F9 armed a recording, start the video writer now so the strike is in the first frame.
+        if (_recordPending && !_recording)
+        {
+            _recordPending = false;
+            StartRecording();
+        }
+
         _shotNumber++;
         _recorder = new ShotRecorder(_engine);
         _rules.OnShotStart(new ShotContext
@@ -1391,6 +1551,10 @@ public sealed class MatchHost : Component
         _recorder.Dispose();
         _recorder = null;
         _shotInFlight = false;
+
+        // If we recorded this shot, finalise the video. Done before the scratch-respawn so the recording
+        // captures the actual end-of-shot ball positions, not the post-respawn cue at head spot.
+        if (_recording) StopRecording();
 
         // Scratch respawn: if the cue ball got pocketed this shot, drop it back on the head spot so the
         // next player can take their ball-in-hand shot. EightBallRules already flagged the foul; this
