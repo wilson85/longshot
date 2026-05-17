@@ -105,14 +105,20 @@ public sealed class MatchHost : Component
     [Property, Range(0f, 20f)] public float CueDrawbackUnits { get; set; } = 4f;
 
     /// <summary>Maximum drawback during a stroke (units). Caps the cue's visual pull-back and the resulting force.</summary>
-    [Property, Range(5f, 60f)] public float MaxDrawbackUnits { get; set; } = 30f;
+    [Property, Range(10f, 120f)] public float MaxDrawbackUnits { get; set; } = 60f;
 
     /// <summary>
     /// Mouse sensitivity for the stroke gesture, in <b>units of drawback per pixel of mouse-Y motion</b>.
-    /// 0.15 ≈ 1:1 feel at default camera distance (60u) and FOV (~60°) where 1 mouse pixel travels
-    /// approximately 1 screen pixel of cue motion. Pulling the mouse ~200 px fills the bar.
+    /// Adjustable at runtime with <b>+</b> / <b>-</b> keys; the value persists via <c>Game.Cookies</c>
+    /// across sessions so each player's preferred feel is remembered.
     /// </summary>
-    [Property, Range(0.02f, 1f)] public float StrokeSensitivity { get; set; } = 0.15f;
+    [Property, Range(0.005f, 1f)] public float StrokeSensitivity { get; set; } = 0.08f;
+
+    /// <summary>Multiplicative step applied when the player presses + or - to adjust <see cref="StrokeSensitivity"/>.</summary>
+    [Property, Range(1.02f, 1.5f)] public float StrokeSensitivityStep { get; set; } = 1.15f;
+
+    /// <summary>Cookie key used to persist <see cref="StrokeSensitivity"/> between sessions.</summary>
+    private const string CookieStrokeSensitivity = "longshot.stroke_sensitivity";
 
     /// <summary>
     /// Cue speed (m/s) that maps to 100% power. The cue's forward velocity at impact is converted
@@ -318,6 +324,7 @@ public sealed class MatchHost : Component
         // -------- Cue stick + aim camera --------
         _aimYawDeg = 0f;                                     // initial aim: along world +X (engine +Z, table length)
         _aimPitchDeg = MathX.Clamp(StartingPitchDeg, MinPitchDeg, MaxPitchDeg);
+        LoadStrokeSensitivityFromCookies();                  // restore saved sensitivity from previous session
         DiscoverViewCameraIfNeeded();                        // find the scene's main camera if not assigned in inspector
         DisableFreeCamIfAny();
         SpawnCueStick();
@@ -442,6 +449,36 @@ public sealed class MatchHost : Component
         {
             Log.Warning($"{nameof(MatchHost)}: no CameraComponent found in the scene. Camera control disabled.");
         }
+    }
+
+    /// <summary>
+    /// Load <see cref="StrokeSensitivity"/> from <c>Game.Cookies</c> if a value was saved in a previous
+    /// session. Bounds-clamps the loaded value so a corrupt or out-of-range cookie can't break input.
+    /// </summary>
+    private void LoadStrokeSensitivityFromCookies()
+    {
+        if (Game.Cookies is null) return;
+        float saved = Game.Cookies.Get(CookieStrokeSensitivity, StrokeSensitivity);
+        StrokeSensitivity = MathX.Clamp(saved, 0.005f, 1f);
+    }
+
+    /// <summary>Persist the current <see cref="StrokeSensitivity"/> to <c>Game.Cookies</c>.</summary>
+    private void SaveStrokeSensitivityToCookies()
+    {
+        Game.Cookies?.Set(CookieStrokeSensitivity, StrokeSensitivity);
+    }
+
+    /// <summary>
+    /// Adjust <see cref="StrokeSensitivity"/> multiplicatively (×<see cref="StrokeSensitivityStep"/> on +,
+    /// ÷step on -), clamped to a sensible range, and persist to <c>Game.Cookies</c>.
+    /// </summary>
+    private void AdjustStrokeSensitivity(bool increase)
+    {
+        float step = MathF.Max(1.01f, StrokeSensitivityStep);
+        float factor = increase ? step : 1f / step;
+        StrokeSensitivity = MathX.Clamp(StrokeSensitivity * factor, 0.005f, 1f);
+        SaveStrokeSensitivityToCookies();
+        Log.Info($"{nameof(MatchHost)}: stroke sensitivity → {StrokeSensitivity:0.000} u/px (saved).");
     }
 
     /// <summary>
@@ -681,6 +718,7 @@ public sealed class MatchHost : Component
         overlay.ScreenText(new Vector2(w - 280, 60),  "B + mouse   butt elevation",          size: 14, color: hudColour);
         overlay.ScreenText(new Vector2(w - 280, 80),  "RMB         overhead view",           size: 14, color: hudColour);
         overlay.ScreenText(new Vector2(w - 280, 100), "R           replay last shot",        size: 14, color: hudColour);
+        overlay.ScreenText(new Vector2(w - 280, 120), $"+ / -       sensitivity {StrokeSensitivity:0.000}", size: 14, color: new Color(0.85f, 0.85f, 0.55f));
 
         // ---- Bottom-centre: power readouts ----
         // While stroking: two readouts side-by-side — "draw" (how far we've pulled back) on the left,
@@ -745,6 +783,11 @@ public sealed class MatchHost : Component
         {
             Replay();
         }
+
+        // -- Sensitivity adjust (+ / -). Persists to Game.Cookies on every change. --
+        // The '+' key requires shift on most keyboards, so we also accept the bare '=' key (same physical key).
+        if (Input.Keyboard.Pressed("=") || Input.Keyboard.Pressed("+"))   AdjustStrokeSensitivity(increase: true);
+        if (Input.Keyboard.Pressed("-"))                                   AdjustStrokeSensitivity(increase: false);
 
         // ---- Mode-driven input handling. Priority: stroke > english > elevation > free aim. ----
         if (_shotInFlight)
