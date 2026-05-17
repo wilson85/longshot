@@ -1131,6 +1131,20 @@ public sealed class MatchHost : Component
         _recorder = null;
         _shotInFlight = false;
 
+        // Scratch respawn: if the cue ball got pocketed this shot, drop it back on the head spot so the
+        // next player can take their ball-in-hand shot. EightBallRules already flagged the foul; this
+        // just restores the cue ball physically so play can continue.
+        if (_engine.PhysicsStates.Length > 0 && _engine.PhysicsStates[0].State == MotionState.Pocketed)
+        {
+            float headSpotZ = -GameSettings.TableLength * 0.25f;
+            _engine.RespawnBall(0, new SnVec3(0, GameSettings.BallRadius, headSpotZ));
+            if (_ballObjects.Count > 0 && _ballObjects[0].IsValid())
+            {
+                _ballObjects[0].Enabled = true;                  // re-show the cue ball GameObject (was disabled when pocketed)
+            }
+            Log.Info($"{nameof(MatchHost)}: cue ball scratched - respawned at head spot.");
+        }
+
         var shot = _rules.LastShot;
         if (shot is null)
         {
