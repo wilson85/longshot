@@ -1360,8 +1360,14 @@ public sealed class MatchHost : Component
         // English → hitOffset in engine local coords (relative to ball centre, in metres). The contact
         // point on the cue ball is (englishH * right + englishV * up) × BallRadius. "right" is perpendicular
         // to the horizontal aim, in the table plane.
+        //
+        // Cross-product order matters because the engine is Y-up while s&box is Z-up. In s&box, "right"
+        // of forward is `forward × up`; in the engine's Y-up frame, "right" is `up × forward` (otherwise
+        // we'd pick up the opposite-handed perpendicular and english H would be inverted between the
+        // visual cue and the physics hitOffset). Verified: aim_engine=(0,0,1), up=(0,1,0) →
+        // up × aim = (+1, 0, 0) = engine +X = right (matches GameSettings convention).
         SnVec3 engineUp     = new SnVec3(0, 1, 0);
-        SnVec3 engineRight  = SnVec3.Normalize(SnVec3.Cross(horizAimEngine, engineUp));
+        SnVec3 engineRight  = SnVec3.Normalize(SnVec3.Cross(engineUp, horizAimEngine));
         SnVec3 hitOffset    = (engineRight * _englishH + engineUp * _englishV) * GameSettings.BallRadius;
 
         _engine.StrikeCueBall(
