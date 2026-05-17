@@ -65,9 +65,57 @@ public sealed class MatchHost : Component
     /// <summary>Visual slate thickness, in s&amp;box units. The top face sits at world Z = 0.</summary>
     [Property] public float SlateThicknessUnits { get; set; } = 1f;
 
+    // -------------------- Aim camera + cue stick --------------------
+
+    /// <summary>
+    /// The scene <see cref="CameraComponent"/> that the aim controller should drive. Optional —
+    /// if left null, <see cref="OnStart"/> auto-discovers the first <c>IsMainCamera</c> component
+    /// in the scene (falling back to the first <see cref="CameraComponent"/> found). Assign by hand
+    /// only if you have multiple cameras and want a non-default one driven.
+    /// </summary>
+    [Property] public CameraComponent ViewCamera { get; set; }
+
+    /// <summary>Camera distance from the cue ball (units). Real billiards eye-line ≈ 50–80 units (1.25–2 m).</summary>
+    [Property, Range(20f, 200f)] public float CameraDistance { get; set; } = 60f;
+
+    /// <summary>Minimum camera pitch (degrees above the table plane). Prevents the camera from going below the table.</summary>
+    [Property, Range(2f, 30f)] public float MinPitchDeg { get; set; } = 8f;
+
+    /// <summary>Maximum camera pitch (degrees above the table plane). 89° = nearly straight down.</summary>
+    [Property, Range(30f, 89f)] public float MaxPitchDeg { get; set; } = 70f;
+
+    /// <summary>Initial camera elevation (degrees). 30° is a comfortable over-the-shoulder default.</summary>
+    [Property, Range(2f, 89f)] public float StartingPitchDeg { get; set; } = 25f;
+
+    /// <summary>Mouse sensitivity multiplier applied to <see cref="Input.AnalogLook"/> deltas.</summary>
+    [Property, Range(0.05f, 2f)] public float MouseSensitivity { get; set; } = 0.3f;
+
+    /// <summary>If true, the camera is positioned around the cue ball every frame (recommended).</summary>
+    [Property] public bool ControlCamera { get; set; } = true;
+
+    /// <summary>Cue stick length (units). Real cues ≈ 56″ ≈ 56u (1u = 1 inch).</summary>
+    [Property, Range(20f, 80f)] public float CueLengthUnits { get; set; } = 56f;
+
+    /// <summary>Cue stick radius at the visual mesh (units). 0.4u ≈ 20 mm diameter.</summary>
+    [Property, Range(0.1f, 2f)] public float CueRadiusUnits { get; set; } = 0.4f;
+
+    /// <summary>Distance the cue's tip is pulled back from the cue ball when at rest (units).</summary>
+    [Property, Range(0f, 20f)] public float CueDrawbackUnits { get; set; } = 4f;
+
+    /// <summary>Tint applied to the cue stick. Default: light maple wood.</summary>
+    [Property] public Color CueColor { get; set; } = new Color(0.82f, 0.65f, 0.42f);
+
     private BilliardsEngine _engine;
     private readonly List<GameObject> _ballObjects = new();
     private readonly List<GameObject> _tableObjects = new();
+
+    // --- Aim state ---
+    /// <summary>Current aim yaw in degrees. 0° = aim along world +X (s&amp;box "forward").</summary>
+    private float _aimYawDeg;
+    /// <summary>Current camera elevation pitch in degrees (clamped to [MinPitchDeg, MaxPitchDeg]).</summary>
+    private float _aimPitchDeg;
+    /// <summary>Spawned in OnStart, transformed every frame. Local +X is the cue's length axis (tip at +X).</summary>
+    private GameObject _cueStickGo;
 
     // --- Rules + per-shot lifecycle ---
     private EightBallRules _rules;
@@ -138,9 +186,74 @@ public sealed class MatchHost : Component
             _ballObjects.Add(go);
         }
 
+        // -------- Cue stick + aim camera --------
+        _aimYawDeg = 0f;                                     // initial aim: along world +X (engine +Z, table length)
+        _aimPitchDeg = MathX.Clamp(StartingPitchDeg, MinPitchDeg, MaxPitchDeg);
+        DiscoverViewCameraIfNeeded();                        // find the scene's main camera if not assigned in inspector
+        DisableFreeCamIfAny();
+        SpawnCueStick();
+        UpdateAimRig();                                      // first-frame placement so the camera/cue aren't at origin
+
         if (AutoStrikeOnStart)
         {
             Strike();
+        }
+    }
+
+    /// <summary>
+    /// Build a procedural cue stick mesh (long thin box, tip at local +X end) and spawn it as a
+    /// renderable GameObject. The mesh is centred on its own origin; <see cref="UpdateAimRig"/> places
+    /// it each frame so the tip sits behind the cue ball at the configured drawback distance.
+    /// </summary>
+    private void SpawnCueStick()
+    {
+        var material = Material.Load("materials/default.vmat");
+        // Box with X = half-length, Y = radius, Z = radius. Tip at +X end (local) → world aim direction
+        // after Rotation.LookAt(aimDir) below.
+        var cueModel = ProceduralMeshes.BuildBox(
+            new Vector3(CueLengthUnits * 0.5f, CueRadiusUnits, CueRadiusUnits),
+            material);
+
+        _cueStickGo = Scene.CreateObject(true);
+        _cueStickGo.Name = "CueStick";
+        var mr = _cueStickGo.AddComponent<ModelRenderer>();
+        mr.Model = cueModel;
+        mr.Tint = CueColor;
+    }
+
+    /// <summary>
+    /// If a <see cref="FreeCam"/> (or similar input-driven rotator) is attached to <see cref="ViewCamera"/>'s
+    /// GameObject, disable it. Without this, FreeCam reads <c>Input.AnalogLook</c> and overwrites our
+    /// camera rotation every frame (see <c>sbox-runtime-rendering</c> skill).
+    /// </summary>
+    private void DisableFreeCamIfAny()
+    {
+        if (ViewCamera is null) return;
+        var freeCam = ViewCamera.GameObject.Components.Get<FreeCam>();
+        if (freeCam is not null) freeCam.Enabled = false;
+    }
+
+    /// <summary>
+    /// Locate the scene's main camera if no <see cref="ViewCamera"/> was assigned in the inspector.
+    /// Order: first <see cref="CameraComponent"/> with <c>IsMainCamera == true</c>, then any other
+    /// <see cref="CameraComponent"/>. Logs a warning if none is found — the aim system will still run
+    /// the cue stick but won't reposition any camera.
+    /// </summary>
+    private void DiscoverViewCameraIfNeeded()
+    {
+        if (ViewCamera.IsValid()) return;
+
+        CameraComponent best = null;
+        foreach (var cam in Scene.GetAllComponents<CameraComponent>())
+        {
+            if (cam.IsMainCamera) { best = cam; break; }
+            best ??= cam;          // fallback to first one found
+        }
+        ViewCamera = best;
+
+        if (ViewCamera is null)
+        {
+            Log.Warning($"{nameof(MatchHost)}: no CameraComponent found in the scene. Camera control disabled.");
         }
     }
 
@@ -166,8 +279,18 @@ public sealed class MatchHost : Component
     {
         if (_engine is null) return;
 
-        // Strike on left-mouse press for first-light testing. Replace with a proper
-        // cue stick + aim + power UI once the integration is verified.
+        // -------- Aim input (only while the shot has settled — locks aim during ball motion) --------
+        if (!_shotInFlight)
+        {
+            var look = Input.AnalogLook;                       // (pitch, yaw, roll) in degrees per frame
+            _aimYawDeg += look.yaw * MouseSensitivity;
+            _aimPitchDeg = MathX.Clamp(_aimPitchDeg + look.pitch * MouseSensitivity, MinPitchDeg, MaxPitchDeg);
+            // Normalise yaw to (-180, 180] to keep numbers tidy in the inspector.
+            _aimYawDeg = ((_aimYawDeg + 180f) % 360f + 360f) % 360f - 180f;
+        }
+
+        UpdateAimRig();
+
         if (Input.Pressed("Attack1"))
         {
             Strike();
@@ -186,6 +309,56 @@ public sealed class MatchHost : Component
             }
 
             go.WorldPosition = Conversions.EngineToWorld(balls[i].Position);
+        }
+    }
+
+    /// <summary>
+    /// Place the camera and cue stick each frame based on <see cref="_aimYawDeg"/>,
+    /// <see cref="_aimPitchDeg"/>, and the cue ball's current world position. Idempotent — safe to call
+    /// from <see cref="OnStart"/> for first-frame placement and from <see cref="OnUpdate"/> thereafter.
+    /// </summary>
+    private void UpdateAimRig()
+    {
+        if (_engine is null) return;
+        if (_engine.PhysicsStates.Length == 0) return;        // no balls spawned yet
+
+        var cue = _engine.PhysicsStates[0];
+        if (cue.State == MotionState.Pocketed) return;        // cue ball is gone — leave rig parked
+
+        Vector3 cueBallWorld = Conversions.EngineToWorld(cue.Position);
+
+        float yawRad   = _aimYawDeg   * (MathF.PI / 180f);
+        float pitchRad = _aimPitchDeg * (MathF.PI / 180f);
+
+        // Aim direction is the horizontal vector the player is pointing at, in s&box world XY plane.
+        Vector3 aimDirWorld = new Vector3(MathF.Cos(yawRad), MathF.Sin(yawRad), 0f);
+
+        // -------- Camera: orbit behind cue ball, look at cue ball --------
+        if (ControlCamera && ViewCamera.IsValid())
+        {
+            float horiz = CameraDistance * MathF.Cos(pitchRad);
+            float vert  = CameraDistance * MathF.Sin(pitchRad);
+            Vector3 camPos = cueBallWorld - aimDirWorld * horiz + new Vector3(0, 0, vert);
+
+            ViewCamera.GameObject.WorldPosition = camPos;
+            ViewCamera.GameObject.WorldRotation = Rotation.LookAt((cueBallWorld - camPos).Normal);
+        }
+
+        // -------- Cue stick: tip pulled back from the cue ball by CueDrawbackUnits along -aim --------
+        if (_cueStickGo.IsValid())
+        {
+            _cueStickGo.Enabled = !_shotInFlight;             // hide while balls are moving
+
+            if (!_shotInFlight)
+            {
+                // Local +X points along aimDirWorld. Tip at +halfLen in local; place GameObject so the tip
+                // sits one CueDrawbackUnits behind the cue ball (cue draws back from the ball at rest).
+                Vector3 tipTarget = cueBallWorld - aimDirWorld * CueDrawbackUnits;
+                Vector3 cueCenter = tipTarget - aimDirWorld * (CueLengthUnits * 0.5f);
+
+                _cueStickGo.WorldPosition = cueCenter;
+                _cueStickGo.WorldRotation = Rotation.LookAt(aimDirWorld);
+            }
         }
     }
 
@@ -310,10 +483,16 @@ public sealed class MatchHost : Component
     }
 
     /// <summary>
-    /// Strikes the cue ball forward (+Z in engine space) with the configured force. Wraps the
+    /// Strikes the cue ball along the current aim direction with the configured force. Wraps the
     /// strike with a fresh <see cref="ShotRecorder"/> + <see cref="EightBallRules.OnShotStart"/>
     /// so the rules observer sees the per-shot lifecycle. Ignored if a shot is already in flight
     /// or the game's over.
+    /// <para>
+    /// The aim direction comes from <see cref="_aimYawDeg"/> (set by mouse look in
+    /// <see cref="OnUpdate"/>). We project to s&amp;box's XY plane, convert to engine coords via
+    /// <see cref="Conversions.WorldToEngine"/>, and zero out any vertical component so the cue
+    /// always strikes parallel to the table (no jump-shot energy unless we add elevation later).
+    /// </para>
     /// </summary>
     public void Strike()
     {
@@ -330,9 +509,24 @@ public sealed class MatchHost : Component
             StateAtStart = _engine.SnapshotState(),
         });
 
+        // World aim direction in s&box's XY plane, derived from current aim yaw.
+        float yawRad = _aimYawDeg * (MathF.PI / 180f);
+        Vector3 aimDirWorld = new Vector3(MathF.Cos(yawRad), MathF.Sin(yawRad), 0f);
+        SnVec3 aimDirEngine = Conversions.WorldToEngine(aimDirWorld);
+        aimDirEngine.Y = 0f;                                   // strip vertical — table-plane shot only
+        if (aimDirEngine.LengthSquared() > 1e-6f)
+        {
+            aimDirEngine = SnVec3.Normalize(aimDirEngine);
+        }
+        else
+        {
+            // Degenerate aim — fall back to engine +Z so we don't pass a zero vector to StrikeCueBall.
+            aimDirEngine = new SnVec3(0, 0, 1);
+        }
+
         _engine.StrikeCueBall(
             id: 0,
-            aimDirection: new SnVec3(0, 0, 1),
+            aimDirection: aimDirEngine,
             force: StrikeForce,
             hitOffset: SnVec3.Zero);
 
