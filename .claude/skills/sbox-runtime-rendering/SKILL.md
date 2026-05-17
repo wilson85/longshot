@@ -71,12 +71,14 @@ The s&box install ships primitives in `<install>/core/models/dev/`. These are LO
 | Path | Native size | Notes |
 |---|---|---|
 | `models/dev/box.vmdl` | 50u cubed | Default fallback for anything box-shaped |
-| `models/dev/sphere.vmdl` | ~50u (verify) | Default sphere |
+| `models/dev/sphere.vmdl` | **64u diameter** (verified 2026-05-17 via Bounds) | Default sphere — note: NOT the same native size as the box |
 | `models/dev/plane.vmdl` | unknown — verify with bounds | Single-sided |
 | `models/dev/plane_large.vmdl` | larger plane | |
 | `models/dev/error.vmdl` | the pink question mark | What loads when a model path is broken |
 
 To verify a model's native size: spawn a GameObject with `LocalScale = (1,1,1)`, assign the model, then `get_runtime_property` for `Bounds`. The bounds extents × 2 = native size.
+
+**Lesson learned (2026-05-17)**: do not assume the dev primitives share a native size. The box is 50u, the sphere is 64u. Mismatched assumption produced spheres rendering 28% larger than intended (visible clipping into the slate). Always verify via Bounds on first use rather than copying numbers between primitive types.
 
 ## Cloud-asset rendering matrix
 

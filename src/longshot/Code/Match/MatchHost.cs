@@ -41,11 +41,13 @@ public sealed class MatchHost : Component
     [Property] public bool SpawnTableVisuals { get; set; } = true;
 
     /// <summary>
-    /// Native size of <c>models/dev/sphere.vmdl</c> in s&amp;box units. The core dev sphere is 50u across,
-    /// so its <c>LocalScale</c> must be divided by 50 to render at a requested diameter (in units).
-    /// Hard-coded as a constant — the dev sphere is the canonical fallback and isn't user-swappable.
+    /// Native size of <c>models/dev/sphere.vmdl</c> in s&amp;box units. Verified empirically 2026-05-17
+    /// via Bounds inspection: the core dev sphere is <b>64u across</b> (not 50u as initially assumed —
+    /// the box and the sphere have different native sizes). LocalScale must be divided by 64 to render
+    /// at a requested diameter in units. Hard-coded as a constant; the dev sphere is the canonical
+    /// fallback and isn't user-swappable.
     /// </summary>
-    private const float DevSphereNativeSize = 50f;
+    private const float DevSphereNativeSize = 64f;
 
     /// <summary>Tint applied to the slate ModelRenderer. Default: classic billiard green.</summary>
     [Property] public Color SlateColor { get; set; } = new Color(0.04f, 0.40f, 0.27f);
@@ -172,13 +174,15 @@ public sealed class MatchHost : Component
     /// <summary>Spawned in OnStart, transformed every frame. Local +X is the cue's length axis (tip at +X).</summary>
     private GameObject _cueStickGo;
 
-    // --- Stroke state (Shooters-Pool-style: hold LMB or S, pull back then push forward) ---
+    // --- Stroke state (Shooters-Pool-style: hold LMB or S, pull back, fire on contact during push) ---
     /// <summary>True while the stroke button (LMB or S) is held.</summary>
     private bool _stroking;
     /// <summary>Live drawback distance during stroke (units). At rest, equals <see cref="CueDrawbackUnits"/>.</summary>
     private float _currentDrawbackUnits;
-    /// <summary>Peak drawback reached during the current stroke. Force is computed from this on release.</summary>
+    /// <summary>Peak drawback reached during the current stroke. Force is computed from this when the cue tip reaches the ball.</summary>
     private float _peakDrawbackUnits;
+    /// <summary>True once the cue tip reached the ball during the push phase and the shot fired. Prevents re-fire while button stays held.</summary>
+    private bool _strokeFired;
 
     // --- English (cue ball contact point) ---
     /// <summary>Side English: fraction of ball radius. -0.5 = full left contact, +0.5 = full right contact.</summary>
@@ -629,41 +633,58 @@ public sealed class MatchHost : Component
     /// <summary>Begin a new stroke gesture. Captures the current drawback baseline and resets the peak tracker.</summary>
     private void BeginStroke()
     {
-        _stroking = true;
+        _stroking             = true;
+        _strokeFired          = false;
         _currentDrawbackUnits = CueDrawbackUnits;
         _peakDrawbackUnits    = CueDrawbackUnits;
     }
 
     /// <summary>
     /// While the stroke button is held: integrate vertical mouse motion into <see cref="_currentDrawbackUnits"/>.
-    /// Positive <c>look.pitch</c> = mouse pulled down = cue drawn back (drawback increases). Drawback is
-    /// clamped to [0, <see cref="MaxDrawbackUnits"/>]; the peak during the stroke is captured separately for
-    /// the force calculation on release.
+    /// Positive <c>look.pitch</c> = mouse pulled down = cue drawn back (drawback increases); negative pitch =
+    /// mouse pushed up = cue strokes forward (drawback decreases). Drawback is clamped to [0, <see cref="MaxDrawbackUnits"/>].
+    /// <para>
+    /// Fire condition (Shooters-Pool feel): the shot commits during the FORWARD STROKE the instant the cue
+    /// tip reaches the cue ball — i.e. when <see cref="_currentDrawbackUnits"/> drops back to (or below) the
+    /// rest position <see cref="CueDrawbackUnits"/>, provided the user actually pulled back past
+    /// <see cref="StrokeFireThresholdUnits"/> first. Releasing the button without completing the push cancels
+    /// the stroke.
+    /// </para>
     /// </summary>
     private void HandleStrokeWhileHeld(Angles look)
     {
+        if (_strokeFired) return;                                // already committed this stroke; wait for button release to start a new one
+
         _currentDrawbackUnits = MathX.Clamp(
             _currentDrawbackUnits + look.pitch * StrokeSensitivity,
             0f, MaxDrawbackUnits);
         if (_currentDrawbackUnits > _peakDrawbackUnits) _peakDrawbackUnits = _currentDrawbackUnits;
-    }
 
-    /// <summary>
-    /// Stroke button released. If peak drawback exceeded the fire threshold AND the user actually pushed
-    /// forward (current drawback dropped from peak), fire the shot. Otherwise treat as a cancel.
-    /// Force is scaled from the peak drawback above the rest position.
-    /// </summary>
-    private void EndStroke()
-    {
+        // Fire the moment the cue tip touches the ball during a forward stroke. "Forward stroke" means
+        // drawback is decreasing (mouse pushing up, look.pitch < 0). We also require a real pull-back
+        // first so a single quick click without aiming doesn't fire a baseline-power shot.
         bool didPullBack    = _peakDrawbackUnits > CueDrawbackUnits + StrokeFireThresholdUnits;
-        bool didPushForward = _currentDrawbackUnits < _peakDrawbackUnits - 0.5f;
-        if (didPullBack && didPushForward)
+        bool tipAtBall      = _currentDrawbackUnits <= CueDrawbackUnits;
+        bool pushingForward = look.pitch < 0f;
+        if (didPullBack && tipAtBall && pushingForward)
         {
             float drawAboveRest = _peakDrawbackUnits - CueDrawbackUnits;
             float force         = drawAboveRest * StrokeForceScale;
             Strike(force);
+            _strokeFired          = true;
+            _currentDrawbackUnits = CueDrawbackUnits;            // park visual at rest; cue is hidden during shot anyway
         }
-        _stroking = false;
+    }
+
+    /// <summary>
+    /// Stroke button released. Pure reset — the shot itself already fired (if it was going to) the moment
+    /// the cue tip reached the ball during the push. Pull-and-release without completing the forward stroke
+    /// is treated as a cancel, in line with the Shooters-Pool feel.
+    /// </summary>
+    private void EndStroke()
+    {
+        _stroking             = false;
+        _strokeFired          = false;
         _currentDrawbackUnits = CueDrawbackUnits;
         _peakDrawbackUnits    = CueDrawbackUnits;
     }
